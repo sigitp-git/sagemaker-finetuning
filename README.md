@@ -47,6 +47,21 @@ estimator.fit({"train": "s3://your-telco-llm-bucket/data/train.jsonl"})
 4. For Qwen3-14B QLoRA (4-bit, multi-GPU), use `ml.g5.12xlarge` (4× A10G GPUs) instead.
 5. Monitor job progress in the [SageMaker Console](https://console.aws.amazon.com/sagemaker) → **Training** → **Training jobs**.
 
+> **Why does Mistral-Nemo (12B BF16 LoRA) fit on 1 GPU while Qwen3-14B (4-bit QLoRA) needs 4?**
+>
+> It comes down to memory requirements and quantization strategy.
+>
+> Mistral-Nemo-Base-2407 is a 12B model trained in BF16 with LoRA (not quantized). LoRA only trains a small set of adapter weights while keeping the base model frozen, so the memory footprint is manageable on a single A10G (24GB VRAM). The math works out roughly as: 12B params × 2 bytes (BF16) ≈ 24GB, which just fits on one A10G with careful batch sizing.
+>
+> Qwen3-14B is larger (14B params) and uses QLoRA with 4-bit quantization via bitsandbytes. You'd think 4-bit would need less memory, and it does for the weights themselves, but there are a few reasons it still needs more GPUs:
+>
+> - Qwen3-14B has a larger architecture with more attention heads and a wider hidden dimension than Mistral-Nemo, so even at 4-bit the activations and optimizer states during training are heavier
+> - QLoRA dequantizes weights to BF16 during the forward/backward pass for gradient computation, so peak memory spikes significantly beyond what the static 4-bit footprint suggests
+> - 14B × 0.5 bytes (4-bit) ≈ 7GB for weights alone, but with activations, gradients, and optimizer states you can easily hit 60–80GB during training
+> - The 4× A10G on `ml.g5.12xlarge` gives you 96GB total VRAM, which handles those spikes comfortably across devices via `accelerate`
+>
+> The counterintuitive result: a smaller model in BF16 with LoRA fits on 1 GPU, while a larger model in 4-bit QLoRA still needs 4 GPUs because training-time memory pressure is dominated by activations and optimizer state, not just weight storage.
+
 > Important: pin `pytorch_version="2.1"` in the estimator. `torch 2.10+cu128` has a CUBLAS regression that breaks all bf16/fp16 training.
 
 ---
