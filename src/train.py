@@ -1,0 +1,126 @@
+"""
+SageMaker entry point for LoRA/QLoRA fine-tuning of 3GPP RCA models.
+Supports: Mistral-Nemo-Base-2407 (BF16 LoRA), Qwen3-14B (QLoRA 4-bit), Gemma-3-12B (BF16 LoRA)
+
+Usage (local):
+  python src/train.py --model_id mistralai/Mistral-Nemo-Base-2407 --bf16 True
+
+Usage (SageMaker): entry_point="train.py", source_dir="./src"
+  hyperparameters passed as CLI args by SageMaker.
+"""
+
+import argparse
+import os
+import json
+import torch
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model
+from trl import SFTTrainer
+
+LORA_CONFIGS = {
+    # model_id -> (r, lora_alpha, target_modules)
+    "mistralai/Mistral-Nemo-Base-2407": (16, 32, ["q_proj", "v_proj"]),
+    "Qwen/Qwen3-14B":                   (16, 32, ["q_proj", "v_proj", "k_proj", "o_proj"]),
+    "google/gemma-3-12b-pt":            (16, 32, ["q_proj", "v_proj"]),
+}
+
+
+def format_example(example):
+    """Convert JSONL example to instruction-following prompt."""
+    log = example["log"]
+    label = json.dumps(example["root_cause"])
+    return {
+        "text": (
+            "### Instruction\nAnalyze the following 3GPP signaling log and identify the root cause.\n\n"
+            f"### Log\n{log}\n\n"
+            f"### Root Cause\n{label}"
+        )
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_id", default="mistralai/Mistral-Nemo-Base-2407")
+    parser.add_argument("--max_steps", type=int, default=325)
+    parser.add_argument("--bf16", type=lambda x: x.lower() == "true", default=True)
+    parser.add_argument("--per_device_train_batch_size", type=int, default=4)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=2)
+    parser.add_argument("--learning_rate", type=float, default=2e-4)
+    parser.add_argument("--use_4bit", type=lambda x: x.lower() == "true", default=False)
+    parser.add_argument("--output_dir", default=os.environ.get("SM_OUTPUT_DATA_DIR", "./output"))
+    parser.add_argument("--train_data", default=os.environ.get("SM_CHANNEL_TRAIN", "./data"))
+    args = parser.parse_args()
+
+    train_file = os.path.join(args.train_data, "train.jsonl") \
+        if os.path.isdir(args.train_data) else args.train_data
+
+    print(f"Model: {args.model_id}")
+    print(f"Train file: {train_file}")
+    print(f"Max steps: {args.max_steps} | BF16: {args.bf16} | 4-bit: {args.use_4bit}")
+
+    # Quantization config for QLoRA
+    bnb_config = None
+    if args.use_4bit:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_id,
+        torch_dtype=torch.bfloat16 if args.bf16 and not args.use_4bit else "auto",
+        device_map="auto",
+        quantization_config=bnb_config,
+        trust_remote_code=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    r, alpha, targets = LORA_CONFIGS.get(args.model_id, (16, 32, ["q_proj", "v_proj"]))
+    lora_config = LoraConfig(
+        r=r, lora_alpha=alpha, target_modules=targets,
+        lora_dropout=0.05, bias="none", task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+
+    dataset = load_dataset("json", data_files=train_file, split="train")
+    dataset = dataset.map(format_example, remove_columns=dataset.column_names)
+
+    training_args = TrainingArguments(
+        output_dir=args.output_dir,
+        max_steps=args.max_steps,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        learning_rate=args.learning_rate,
+        bf16=args.bf16 and not args.use_4bit,
+        fp16=False,
+        logging_steps=25,
+        save_steps=args.max_steps,
+        warmup_ratio=0.05,
+        lr_scheduler_type="cosine",
+        report_to="none",
+    )
+
+    trainer = SFTTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset,
+        dataset_text_field="text",
+        max_seq_length=1024,
+        tokenizer=tokenizer,
+    )
+    trainer.train()
+
+    adapter_dir = os.path.join(args.output_dir, "adapter")
+    model.save_pretrained(adapter_dir)
+    tokenizer.save_pretrained(adapter_dir)
+    print(f"Adapter saved to {adapter_dir}")
+
+
+if __name__ == "__main__":
+    main()

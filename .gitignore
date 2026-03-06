@@ -1,0 +1,11 @@
+data/
+adapters/
+results/
+reports/
+output/
+__pycache__/
+*.pyc
+*.pth
+*.bin
+node_modules/
+generation.log
