@@ -69,10 +69,9 @@ def main():
             bnb_4bit_use_double_quant=True,
         )
 
-    # For BF16 LoRA (non-quantized): load on CPU first with low_cpu_mem_usage=True to avoid
-    # OOM during weight loading on the 24GB A10G (12B BF16 ≈ 24GB leaves zero headroom).
-    # PEFT wraps the CPU model, then we move to GPU after — this avoids the meta tensor issue
-    # and the OOM from loading directly to cuda:0.
+    # For BF16 LoRA: load entirely on CPU first to avoid OOM during weight loading.
+    # Mistral-Nemo 12B BF16 ≈ 24GB — exactly the A10G limit, leaving zero headroom.
+    # Strategy: load on CPU → wrap with PEFT on CPU → move to GPU → enable gradient checkpointing.
     # For QLoRA (4-bit): device_map="auto" is required by bitsandbytes.
     load_kwargs = dict(
         torch_dtype=torch.bfloat16 if args.bf16 and not args.use_4bit else "auto",
@@ -82,6 +81,8 @@ def main():
     )
     if args.use_4bit:
         load_kwargs["device_map"] = "auto"
+    else:
+        load_kwargs["device_map"] = "cpu"  # load fully on CPU, move to GPU after PEFT wrapping
 
     model = AutoModelForCausalLM.from_pretrained(args.model_id, **load_kwargs)
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
