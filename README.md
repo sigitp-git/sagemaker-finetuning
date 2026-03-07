@@ -140,7 +140,31 @@ Steps:
 
 ```bash
 pip install sagemaker
-pip install transformers peft trl datasets accelerate bitsandbytes
+pip install transformers peft trl datasets accelerate bitsandbytes huggingface_hub scikit-learn
+```
+
+Validate all packages are installed correctly:
+
+```python
+import importlib.metadata as m
+for pkg in ['sagemaker','transformers','peft','trl','datasets','accelerate','bitsandbytes','huggingface_hub','scikit-learn']:
+    try:
+        print(f'{pkg}: {m.version(pkg)}')
+    except Exception as e:
+        print(f'{pkg}: MISSING ({e})')
+```
+
+Expected output:
+```
+sagemaker: 3.5.0
+transformers: 5.3.0
+peft: 0.18.1
+trl: 0.29.0
+datasets: 4.6.1
+accelerate: 1.13.0
+bitsandbytes: 0.49.2
+huggingface_hub: 1.6.0
+scikit-learn: 1.8.0
 ```
 
 2. Download the base model from Hugging Face (requires HF token for gated models):
