@@ -656,6 +656,15 @@ AWS services for running custom ML workloads. SageMaker provides managed trainin
 **Edge Deployment**
 Running a model close to where data is generated — e.g., inside a telco's data center or on an AWS Outpost — rather than sending data to a central cloud API. Reduces latency, cost, and data sovereignty concerns.
 
+**CUDA (Compute Unified Device Architecture)**
+NVIDIA's parallel computing platform and programming model that lets software use the GPU for general-purpose computation — not just graphics.
+
+In the context of this benchmark:
+- PyTorch uses CUDA to run model training on the GPU. When you see `torch.cuda.is_available()`, it's checking whether a CUDA-capable GPU is present and accessible.
+- The `cu121` / `cu128` suffixes in DLC image names (e.g. `pytorch2.3.0-cu121`) refer to the CUDA toolkit version bundled in that container — `cu121` = CUDA 12.1, `cu128` = CUDA 12.8.
+- The CUBLAS regression mentioned in this guide (`torch 2.10+cu128`) is a bug in CUDA 12.8's linear algebra library (cuBLAS) that corrupts BF16/FP16 matrix multiplications during training — which is why we pin to `pytorch2.1` / `pytorch2.3.0+cu121`.
+- `device_map={"": 0}` in `train.py` means "put everything on `cuda:0`" — the first (and only) GPU on the `ml.g5.2xlarge` instance.
+
 **Deep Learning AMI (Amazon Machine Image)**
 A pre-configured EC2 virtual machine image provided by AWS that comes with CUDA, PyTorch, TensorFlow, and common ML libraries pre-installed. Saves hours of environment setup when launching a GPU instance.
 
