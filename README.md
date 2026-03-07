@@ -246,6 +246,21 @@ python submit_training.py --role ... --bucket ... --model_id ... --wait
 # Stream CloudWatch logs
 aws logs tail /aws/sagemaker/TrainingJobs \
   --log-stream-name-prefix <job-name> --follow
+
+# Poll every 60s until terminal state (bash loop)
+while true; do
+  RESULT=$(aws sagemaker describe-training-job \
+    --training-job-name <job-name> \
+    --query '{Status:TrainingJobStatus, Elapsed:TrainingTimeInSeconds, Failure:FailureReason}' \
+    --output json)
+  echo "[$(date -u '+%H:%M:%S')] $RESULT"
+  STATUS=$(echo $RESULT | python3 -c "import sys,json; print(json.load(sys.stdin)['Status'])")
+  if [[ "$STATUS" == "Completed" || "$STATUS" == "Failed" || "$STATUS" == "Stopped" ]]; then
+    echo "Job reached terminal state: $STATUS"
+    break
+  fi
+  sleep 60
+done
 ```
 
 4. Save the LoRA adapter and upload to S3:
