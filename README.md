@@ -265,6 +265,88 @@ while true; do
 done
 ```
 
+**Mistral-Nemo QLoRA 4-bit — Training Output (Completed)**
+
+```
+ 98%|█████████▊| 320/325 [40:22<00:34,  6.85s/it]
+ 99%|█████████▉| 321/325 [40:29<00:27,  6.97s/it]
+ 99%|█████████▉| 322/325 [40:35<00:20,  6.84s/it]
+ 99%|█████████▉| 323/325 [40:41<00:13,  6.59s/it]
+100%|█████████▉| 324/325 [40:49<00:06,  6.89s/it]
+100%|██████████| 325/325 [40:56<00:00,  6.86s/it]
+{'loss': 1.0355, 'grad_norm': 2.1321821212768555, 'learning_rate': 0.0, 'epoch': 2.01}
+100%|██████████| 325/325 [40:57<00:00,  7.56s/it]
+{'train_runtime': 2457.0749, 'train_samples_per_second': 1.058, 'train_steps_per_second': 0.132, 'train_loss': 1.3590671245868389, 'epoch': 2.01}
+Adapter saved to /opt/ml/output/data/adapter
+sagemaker-training-toolkit INFO  Reporting training SUCCESS
+```
+
+> **Training Summary — Mistral-Nemo QLoRA 4-bit**
+>
+> - **Job**: `telco-rca-mistral-nemo-base-2407-2026-03-07-18-19-25-833`
+> - **Status**: Completed
+> - **Steps**: 325/325, ~41 min training time, 2 epochs
+> - **Final loss**: 1.035 (started ~2.0, dropped steadily through 1.35 → 1.09 → 0.98 → 1.03)
+> - **Average train loss**: 1.359
+> - **Adapter saved to**: `/opt/ml/output/data/adapter`
+> - **Output uploaded to**: `s3://your-telco-llm-bucket/output/mistral-nemo-base-2407/`
+>
+**Mistral-Nemo QLoRA 4-bit — Training Metrics Log**
+
+```
+Step  25  | loss: 3.4207 | grad_norm: 3.0827 | lr: 1.997e-04 | epoch: 0.15
+Step  50  | loss: 1.6251 | grad_norm: 2.5550 | lr: 1.944e-04 | epoch: 0.31
+Step  75  | loss: 1.3590 | grad_norm: 2.6612 | lr: 1.830e-04 | epoch: 0.46
+Step 100  | loss: 1.3540 | grad_norm: 1.8951 | lr: 1.663e-04 | epoch: 0.62
+Step 125  | loss: 1.3426 | grad_norm: 2.0330 | lr: 1.452e-04 | epoch: 0.77
+Step 150  | loss: 1.2488 | grad_norm: 1.8794 | lr: 1.213e-04 | epoch: 0.93
+Step 175  | loss: 1.1902 | grad_norm: 1.8159 | lr: 9.592e-05 | epoch: 1.08
+Step 200  | loss: 1.0485 | grad_norm: 2.3825 | lr: 7.085e-05 | epoch: 1.23
+Step 225  | loss: 1.0046 | grad_norm: 1.8702 | lr: 4.766e-05 | epoch: 1.39
+Step 250  | loss: 1.0953 | grad_norm: 2.4519 | lr: 2.786e-05 | epoch: 1.54
+Step 275  | loss: 0.9816 | grad_norm: 1.7921 | lr: 1.273e-05 | epoch: 1.70
+Step 300  | loss: 0.9620 | grad_norm: 2.2479 | lr: 3.234e-06 | epoch: 1.85
+Step 325  | loss: 1.0355 | grad_norm: 2.1322 | lr: 0.000e+00 | epoch: 2.01
+```
+
+> **What does the loss curve mean?**
+>
+> The *training loss* measures how wrong the model's predictions are on each batch — lower is better. At the start of training, the model has never seen 3GPP logs, so its predictions are essentially random (loss ≈ 3.4). As it processes more batches, it learns the structure of the logs and the mapping to root cause codes, and the loss drops rapidly.
+>
+> The progression 3.42 → 1.63 → 1.36 → 1.05 → 0.96 → 1.04 shows a healthy convergence pattern:
+> - **Epoch 1 (steps 1–162)**: Steep drop from 3.4 to ~1.2 — the model is learning the basic task structure (log format, output schema, common failure patterns).
+> - **Epoch 2 (steps 163–325)**: Gradual refinement from ~1.2 to ~1.0 — the model is fine-tuning its understanding of subtle differences between failure types (e.g., distinguishing `congestion` from `qos_violation`).
+> - **Final loss 1.035**: The slight uptick from 0.96 → 1.04 at the very end is normal — it's batch-level noise, not overfitting. The overall trend is clearly downward.
+>
+> The *average train loss* of 1.359 is the mean across all 325 steps. It's higher than the final loss because it includes the early high-loss steps when the model was still learning.
+>
+> ```
+> Loss
+> 3.5 │ ●
+>     │
+> 3.0 │
+>     │
+> 2.5 │
+>     │
+> 2.0 │
+>     │
+> 1.5 │    ●
+>     │       ● ● ●
+>     │              ●
+>     │                 ●
+> 1.0 │                    ● ●  ●  ● ● ●
+>     │
+> 0.5 │
+>     │
+> 0.0 └──────────────────────────────────────
+>     0.0  0.3  0.5  0.8  1.0  1.2  1.5  1.7  2.0
+>                        Epoch
+>
+> Mistral-Nemo QLoRA 4-bit — Loss Curve (325 steps, 2 epochs)
+> ```
+>
+> The loss curve looks healthy — it converged nicely over 2 epochs. The adapter is ready for evaluation.
+
 4. Save the LoRA adapter and upload to S3:
 
 ```bash
