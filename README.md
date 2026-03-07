@@ -197,32 +197,57 @@ hf auth login
 # Models: mistralai/Mistral-Nemo-Base-2407, Qwen/Qwen3-14B, google/gemma-3-12b-pt
 ```
 
-3. Run fine-tuning with LoRA (example for Ministral 3 14B):
+3. Submit the SageMaker Training Job using `submit_training.py` (repo root):
 
-```python
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
-from peft import LoraConfig, get_peft_model
-from trl import SFTTrainer
-from datasets import load_dataset
+```bash
+# Ministral 3 14B — BF16 LoRA on 1× A10G (ml.g5.2xlarge)
+python submit_training.py \
+  --role arn:aws:iam::ACCOUNT_ID:role/SageMakerRole \
+  --bucket your-telco-llm-bucket \
+  --model_id mistralai/Mistral-Nemo-Base-2407 \
+  --max_steps 325
 
-model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-Nemo-Base-2407",
-                                              torch_dtype="bfloat16", device_map="auto")
-lora_config = LoraConfig(r=16, lora_alpha=32, target_modules=["q_proj","v_proj"],
-                          lora_dropout=0.05, task_type="CAUSAL_LM")
-model = get_peft_model(model, lora_config)
+# Qwen3-14B — QLoRA 4-bit on 4× A10G (ml.g5.12xlarge)
+python submit_training.py \
+  --role arn:aws:iam::ACCOUNT_ID:role/SageMakerRole \
+  --bucket your-telco-llm-bucket \
+  --model_id Qwen/Qwen3-14B \
+  --max_steps 325
 
-training_args = TrainingArguments(output_dir="./output", max_steps=325,
-                                   per_device_train_batch_size=4, bf16=True)
-trainer = SFTTrainer(model=model, args=training_args,
-                     train_dataset=load_dataset("json", data_files="train.jsonl")["train"])
-trainer.train()
+# Gemma 3 12B — BF16 LoRA on 1× A10G (ml.g5.2xlarge)
+python submit_training.py \
+  --role arn:aws:iam::ACCOUNT_ID:role/SageMakerRole \
+  --bucket your-telco-llm-bucket \
+  --model_id google/gemma-3-12b-pt \
+  --max_steps 325
+```
+
+The script auto-selects the correct instance type and quantization mode per model. Add `--wait` to block and stream status until the job completes.
+
+Monitor training progress:
+
+```bash
+# One-shot status check
+aws sagemaker describe-training-job \
+  --training-job-name <job-name> \
+  --query 'TrainingJobStatus' --output text
+
+# Poll until completion (built into submit_training.py with --wait flag)
+python submit_training.py --role ... --bucket ... --model_id ... --wait
+
+# Stream CloudWatch logs
+aws logs tail /aws/sagemaker/TrainingJobs \
+  --log-stream-name-prefix <job-name> --follow
 ```
 
 4. Save the LoRA adapter and upload to S3:
 
 ```bash
-model.save_pretrained("./ministral-3-14b-lora-adapter")
-aws s3 cp ./ministral-3-14b-lora-adapter s3://your-telco-llm-bucket/adapters/ministral/ --recursive
+# Adapter is saved automatically by train.py to {output_dir}/adapter/
+# SageMaker uploads it to s3://your-telco-llm-bucket/output/<model-slug>/ on job completion
+# Download locally if needed:
+aws s3 cp s3://your-telco-llm-bucket/output/mistral-nemo-base-2407/adapter/ \
+  ./adapters/ministral/ --recursive
 ```
 
 Training cost reference:
