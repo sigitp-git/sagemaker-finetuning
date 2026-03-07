@@ -116,3 +116,50 @@ DLC image used: `763104351884.dkr.ecr.us-east-1.amazonaws.com/huggingface-pytorc
 > Note: The `pytorch_version="2.1"` pin in the README was intended to avoid a CUBLAS regression in `torch 2.10+cu128`. That regression does not affect `2.3.0+cu121`, so the upgrade is safe.
 
 New job submitted: `telco-rca-mistral-nemo-base-2407-2026-03-07-02-45-53-116`
+
+
+---
+
+## [2026-03-07] Meta tensor offloading breaks PEFT on single-GPU BF16 LoRA
+
+**Job:** `telco-rca-mistral-nemo-base-2407-2026-03-07-02-45-53-116`  
+**Status:** Failed after ~577s
+
+### Error
+
+```
+NotImplementedError: Cannot copy out of meta tensor; no data!
+Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to()
+when moving module from meta to a different device.
+```
+
+Log also showed: `Some parameters are on the meta device because they were offloaded to the cpu.`
+
+### Root Cause
+
+`device_map="auto"` on a single `ml.g5.2xlarge` (24GB VRAM) caused transformers to split
+Mistral-Nemo (12B BF16 ≈ 24GB) across GPU and CPU, placing some layers on the meta device.
+When PEFT's `get_peft_model()` subsequently tried to wrap those layers, it hit a PyTorch
+restriction that prevents copying data out of meta tensors.
+
+### Fix
+
+For BF16 LoRA (non-quantized), replaced `device_map="auto"` with `device_map={"": 0}` to
+force all layers onto `cuda:0`. For QLoRA (4-bit), `device_map="auto"` is still required
+by bitsandbytes and is safe because 4-bit weights fit comfortably in VRAM.
+
+```python
+# Before
+model = AutoModelForCausalLM.from_pretrained(
+    args.model_id,
+    torch_dtype=torch.bfloat16,
+    device_map="auto",   # splits across CPU+GPU, breaks PEFT
+    ...
+)
+
+# After
+load_kwargs["device_map"] = {"": 0}   # BF16 LoRA: all layers on cuda:0
+# load_kwargs["device_map"] = "auto"  # QLoRA only
+```
+
+New job submitted: `telco-rca-mistral-nemo-base-2407-2026-03-07-03-19-15-070`
