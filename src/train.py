@@ -69,13 +69,20 @@ def main():
             bnb_4bit_use_double_quant=True,
         )
 
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
+    # For BF16 LoRA (non-quantized): load directly to cuda without device_map to avoid
+    # meta tensor offloading which breaks PEFT's get_peft_model() on single-GPU instances.
+    # For QLoRA (4-bit): device_map="auto" is required by bitsandbytes.
+    load_kwargs = dict(
         torch_dtype=torch.bfloat16 if args.bf16 and not args.use_4bit else "auto",
-        device_map="auto",
         quantization_config=bnb_config,
         trust_remote_code=True,
     )
+    if args.use_4bit:
+        load_kwargs["device_map"] = "auto"
+    else:
+        load_kwargs["device_map"] = {"": 0}  # force all layers onto cuda:0
+
+    model = AutoModelForCausalLM.from_pretrained(args.model_id, **load_kwargs)
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
