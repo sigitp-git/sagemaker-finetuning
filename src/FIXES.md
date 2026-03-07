@@ -163,3 +163,44 @@ load_kwargs["device_map"] = {"": 0}   # BF16 LoRA: all layers on cuda:0
 ```
 
 New job submitted: `telco-rca-mistral-nemo-base-2407-2026-03-07-03-19-15-070`
+
+
+---
+
+## [2026-03-07] CUDA out of memory loading 12B BF16 model on 24GB A10G
+
+**Job:** `telco-rca-mistral-nemo-base-2407-2026-03-07-03-19-15-070`  
+**Status:** Failed after ~592s
+
+### Error
+
+```
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 140.00 MiB.
+```
+
+Traceback pointed to `set_module_tensor_to_device` — crash during model loading, not training.
+
+### Root Cause
+
+`device_map={"": 0}` (from the previous fix) forces all 12B BF16 weights (~24GB) onto
+`cuda:0` in one shot. The A10G has exactly 24GB VRAM, leaving zero headroom for the CUDA
+runtime, activations, or optimizer states. The 140MB allocation that tipped it over was
+the final layer being moved to GPU.
+
+### Fix
+
+Three changes to `train.py`:
+
+1. Load model on CPU first (`low_cpu_mem_usage=True`, no `device_map` for BF16), let PEFT
+   wrap it, then move to GPU with `model.to("cuda")`. This avoids the all-at-once GPU
+   allocation spike.
+
+2. Enable gradient checkpointing (`model.gradient_checkpointing_enable()` +
+   `gradient_checkpointing=True` in `TrainingArguments`). Trades recomputation for memory —
+   reduces activation memory from O(layers) to O(1) during the backward pass.
+
+3. Reduce `per_device_train_batch_size` from 4 → 1, increase
+   `gradient_accumulation_steps` from 2 → 8. Effective batch size stays the same (8)
+   but peak activation memory per step drops 4×.
+
+New job submitted: `telco-rca-mistral-nemo-base-2407-2026-03-07-04-06-05-439`
