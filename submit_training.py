@@ -73,8 +73,8 @@ def main():
         role=args.role,
         sagemaker_session=sm_session,
         transformers_version="4.46",
-        pytorch_version="2.1",
-        py_version="py310",
+        pytorch_version="2.3.0",
+        py_version="py311",
         hyperparameters={
             "model_id":   args.model_id,
             "max_steps":  args.max_steps,
