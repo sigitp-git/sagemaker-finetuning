@@ -246,3 +246,42 @@ model.gradient_checkpointing_enable()
 ```
 
 New job submitted: `telco-rca-mistral-nemo-base-2407-2026-03-07-14-53-48-076`
+
+
+---
+
+## [2026-03-07] Mistral-Nemo BF16 cannot be moved to GPU — switched to QLoRA 4-bit
+
+**Job:** `telco-rca-mistral-nemo-base-2407-2026-03-07-14-53-48-076`  
+**Status:** Failed after ~572s
+
+### Error
+
+```
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.25 GiB.
+```
+
+Crash at `model.to("cuda")` after successful CPU load and PEFT wrapping.
+
+### Root Cause
+
+Even after loading on CPU and wrapping with PEFT, moving the full 12B BF16 model (~24GB)
+to the 24GB A10G in one shot via `.to("cuda")` leaves zero headroom and OOMs. The A10G
+simply cannot hold a 12B BF16 model AND have any memory left for activations, gradients,
+or optimizer states during training.
+
+### Fix
+
+Switched `mistralai/Mistral-Nemo-Base-2407` to QLoRA 4-bit in `submit_training.py`
+`MODEL_DEFAULTS`, same as Qwen3-14B. At 4-bit, weights are ~6GB leaving ~18GB for
+activations and optimizer states on the 24GB A10G.
+
+```python
+# Before
+"mistralai/Mistral-Nemo-Base-2407": {"instance_type": "ml.g5.2xlarge", "use_4bit": False},
+
+# After
+"mistralai/Mistral-Nemo-Base-2407": {"instance_type": "ml.g5.2xlarge", "use_4bit": True},
+```
+
+New job submitted: `telco-rca-mistral-nemo-base-2407-2026-03-07-18-19-25-833`
