@@ -12,6 +12,7 @@ All steps use AWS managed services, with Amazon SageMaker Training Jobs as the p
 
 1. [Provision Infrastructure](#1-provision-infrastructure)
 2. [Prepare Synthetic Training Data](#2-prepare-synthetic-training-data)
+   - [S3 Bucket Structure](#s3-bucket-structure)
 3. [Fine-Tune the SLMs](#3-fine-tune-the-slms)
 4. [Evaluate Frontier Models via Bedrock](#4-evaluate-frontier-models-via-bedrock)
    - [4.1 Prerequisites](#41-prerequisites)
@@ -167,6 +168,59 @@ aws s3 mb s3://your-telco-llm-bucket
 aws s3 cp train.jsonl s3://your-telco-llm-bucket/data/train.jsonl
 aws s3 cp test.jsonl  s3://your-telco-llm-bucket/data/test.jsonl
 ```
+
+#### S3 Bucket Structure
+
+As you progress through the benchmark steps, the S3 bucket accumulates artifacts from data upload, training, inference, and evaluation. Here is the full layout and what each path is for:
+
+```
+s3://your-telco-llm-bucket/
+│
+├── data/                                          # Uploaded by you (Step 2)
+│   ├── train.jsonl                                #   1,300 training examples
+│   └── test.jsonl                                 #   992 test examples
+│
+├── output/                                        # Created by SageMaker Training Jobs (Steps 3 & 6)
+│   ├── mistral-nemo-base-2407/                    #   One subfolder per model slug
+│   │   ├── telco-rca-mistral-nemo-...-833/        #   One subfolder per job (timestamp in name)
+│   │   │   └── output/output.tar.gz              #     Tarball containing adapter/ + checkpoint-N/
+│   │   └── ...                                    #   Earlier failed/retried jobs also appear here
+│   ├── qwen3-14b/
+│   │   └── telco-rca-qwen3-14b-...-355/
+│   │       └── output/output.tar.gz
+│   └── gemma-3-12b-pt/
+│       └── telco-rca-gemma-3-12b-pt-...-774/
+│           └── output/output.tar.gz
+│
+├── inference-output/                              # Created by submit_inference.py (Step 6.5)
+│   ├── mistral-nemo-base-2407/                    #   Inference job output per model
+│   │   └── telco-rca-infer-...-993/
+│   │       └── output/output.tar.gz              #     Contains preds_<slug>_slm.jsonl
+│   ├── qwen3-14b/
+│   └── gemma-3-12b-pt/
+│
+├── results/                                       # Uploaded by you after scoring (Step 6)
+│   └── results.json                               #   Accumulated metrics for all models/strategies
+│
+├── code/                                          # Auto-uploaded by submit_inference.py
+│   └── src/                                       #   Copy of src/ for SageMaker job access
+│
+└── telco-rca-<model>-<timestamp>/                 # SageMaker job metadata (auto-created)
+    ├── debug-output/                              #   Training job debug logs
+    ├── profiler-output/                           #   System profiler metrics (CPU, GPU, memory)
+    └── source/sourcedir.tar.gz                    #   Packaged source_dir tarball
+```
+
+| Path | Created By | Description |
+|------|-----------|-------------|
+| `data/` | Manual upload (Step 2) | Training and test JSONL datasets |
+| `output/<model-slug>/` | `submit_training.py` → SageMaker Training Job (Step 3) | LoRA adapter weights packaged as `output.tar.gz` by SageMaker on job completion. Each job gets its own timestamped subfolder. The tarball contains `adapter/` (final adapter) and `checkpoint-N/` (intermediate checkpoint). |
+| `inference-output/<model-slug>/` | `submit_inference.py` → SageMaker Training Job (Step 6.5) | Inference predictions packaged as `output.tar.gz`. Contains `preds_<slug>_slm.jsonl`. |
+| `results/` | Manual upload after running `src/evaluate.py` (Step 6) | Accumulated `results.json` with metrics for all models and strategies. |
+| `code/src/` | `submit_inference.py` (auto-uploaded) | Copy of the `src/` directory so `filter.py` is available to the inference script on SageMaker. |
+| `telco-rca-<model>-<timestamp>/` | SageMaker (auto-created per job) | Job metadata: debug logs, system profiler output (GPU/CPU utilization), and the packaged `source_dir` tarball. These appear at the bucket root because SageMaker creates them alongside the job. |
+
+> **Note:** Failed and retried training jobs leave their folders in `output/` and at the bucket root. These can be cleaned up with `aws s3 rm s3://your-telco-llm-bucket/telco-rca-<failed-job>/ --recursive` but are harmless to leave in place.
 
 ---
 
