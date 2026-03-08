@@ -1,7 +1,4 @@
 adapters/
-results/
-reports/
-output/
 __pycache__/
 *.pyc
 *.pth
