@@ -1150,16 +1150,18 @@ python3 submit_inference.py \
 
 #### 6.5.3 Submitted Inference Jobs
 
-| Model | Job Name | Instance |
-|-------|----------|----------|
-| Mistral-Nemo | `telco-rca-infer-mistral-nemo-base-24-2026-03-08-03-49-49-993` | ml.g5.2xlarge |
-| Qwen3-14B | `telco-rca-infer-qwen3-14b-2026-03-08-03-50-02-217` | ml.g5.12xlarge |
-| Gemma 3 12B | `telco-rca-infer-gemma-3-12b-pt-2026-03-08-03-53-03-117` | ml.g5.2xlarge |
+| Model | Job Name | Instance | Duration | Status |
+|-------|----------|----------|----------|--------|
+| Mistral-Nemo | `telco-rca-infer-mistral-nemo-base-24-2026-03-08-04-37-06-789` | ml.g5.2xlarge | 32 minutes | Completed |
+| Qwen3-14B | `telco-rca-infer-qwen3-14b-2026-03-08-03-50-02-217` | ml.g5.12xlarge | 2 hours | Completed |
+| Gemma 3 12B | `telco-rca-infer-gemma-3-12b-pt-2026-03-08-03-53-03-117` | ml.g5.2xlarge | an hour | Completed |
+
+![SageMaker Inference Jobs - All Completed](images/sagemaker-inference-jobs-completed.png)
 
 Poll status:
 
 ```bash
-aws sagemaker describe-training-job --training-job-name telco-rca-infer-mistral-nemo-base-24-2026-03-08-03-49-49-993 --query TrainingJobStatus --output text
+aws sagemaker describe-training-job --training-job-name telco-rca-infer-mistral-nemo-base-24-2026-03-08-04-37-06-789 --query TrainingJobStatus --output text
 aws sagemaker describe-training-job --training-job-name telco-rca-infer-qwen3-14b-2026-03-08-03-50-02-217 --query TrainingJobStatus --output text
 aws sagemaker describe-training-job --training-job-name telco-rca-infer-gemma-3-12b-pt-2026-03-08-03-53-03-117 --query TrainingJobStatus --output text
 ```
