@@ -24,6 +24,7 @@ MODEL_DEFAULTS = {
     "mistralai/Mistral-Nemo-Base-2407": {"instance_type": "ml.g5.2xlarge"},
     "Qwen/Qwen3-14B":                   {"instance_type": "ml.g5.12xlarge"},
     "google/gemma-3-12b-pt":            {"instance_type": "ml.g5.2xlarge"},
+    "google/gemma-3-12b-it":            {"instance_type": "ml.g5.2xlarge"},
 }
 
 

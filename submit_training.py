@@ -28,6 +28,7 @@ MODEL_DEFAULTS = {
     "mistralai/Mistral-Nemo-Base-2407": {"instance_type": "ml.g5.2xlarge",  "use_4bit": True},
     "Qwen/Qwen3-14B":                   {"instance_type": "ml.g5.12xlarge", "use_4bit": True},
     "google/gemma-3-12b-pt":            {"instance_type": "ml.g5.2xlarge",  "use_4bit": True},
+    "google/gemma-3-12b-it":            {"instance_type": "ml.g5.2xlarge",  "use_4bit": True},
 }
 
 def parse_args():
