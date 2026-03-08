@@ -1680,6 +1680,8 @@ Patterns are pre-compiled for performance and ordered from most specific to most
 
 This gives Qwen3's verbose output more room to eventually mention the label keyword that the improved filter can catch.
 
+> **Note:** The initial D+E inference run used `max_new_tokens=256`, but both jobs timed out at the 2-hour `max_run` limit (~7,200s) — generating 4× more tokens per example made inference too slow to complete 992 examples. Reduced to `max_new_tokens=128` (2× the original) and increased `max_run` to 4 hours (14,400s) for the retry.
+
 **Validation — no regression on Mistral-Nemo:**
 
 ```bash
@@ -1707,10 +1709,14 @@ python3 submit_inference.py \
 
 **D+E inference jobs:**
 
-| Model | Job Name | Instance | Status |
-|-------|----------|----------|--------|
-| Qwen3-14B | `telco-rca-infer-qwen3-14b-2026-03-08-20-44-08-467` | ml.g5.12xlarge | In Progress |
-| Gemma 3 12B IT | `telco-rca-infer-gemma-3-12b-it-2026-03-08-20-44-11-474` | ml.g5.2xlarge | In Progress |
+| Model | Job Name | Instance | max_new_tokens | Status |
+|-------|----------|----------|----------------|--------|
+| Qwen3-14B | `telco-rca-infer-qwen3-14b-2026-03-08-20-44-08-467` | ml.g5.12xlarge | 256 | Stopped (timeout at 2h) |
+| Gemma 3 12B IT | `telco-rca-infer-gemma-3-12b-it-2026-03-08-20-44-11-474` | ml.g5.2xlarge | 256 | Stopped (timeout at 2h) |
+| Qwen3-14B | `telco-rca-infer-qwen3-14b-2026-03-08-23-20-54-296` | ml.g5.12xlarge | 128 | In Progress |
+| Gemma 3 12B IT | `telco-rca-infer-gemma-3-12b-it-2026-03-08-23-20-55-358` | ml.g5.2xlarge | 128 | In Progress |
+
+> The first D+E run with `max_new_tokens=256` timed out at the 2-hour `max_run` limit — generating 4× more tokens per example made inference too slow. Retried with `max_new_tokens=128` and `max_run=14400` (4 hours).
 
 ---
 

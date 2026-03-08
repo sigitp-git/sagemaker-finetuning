@@ -100,7 +100,7 @@ def main():
         environment=env,
         output_path=f"s3://{args.bucket}/inference-output/{slug}/",
         base_job_name=f"telco-rca-infer-{slug[:20]}",
-        max_run=7200,  # 2 hour max
+        max_run=14400,  # 4 hour max
     )
 
     estimator.fit(

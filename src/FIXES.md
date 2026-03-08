@@ -683,3 +683,45 @@ def format_example(example):
     return {"prompt": "...prompt...\n### Root Cause\n", "completion": label}
 trainer = SFTTrainer(...)  # auto-detects prompt-completion format
 ```
+
+
+---
+
+## [2026-03-08] D+E inference — max_new_tokens=256 timed out at 2-hour max_run limit
+
+**Jobs:** `telco-rca-infer-qwen3-14b-2026-03-08-20-44-08-467`, `telco-rca-infer-gemma-3-12b-it-2026-03-08-20-44-11-474`
+**Status:** Both stopped at ~7,200s (2-hour max_run limit)
+
+### Error
+
+Both jobs were killed by SageMaker's `max_run` timeout before completing inference on all 992 examples. No output was written to S3.
+
+### Root Cause
+
+Increasing `max_new_tokens` from 64 to 256 (4×) made each example take ~4× longer to generate. With 992 examples at batch_size=4, the total generation time exceeded the 2-hour `max_run` limit set in `submit_inference.py`.
+
+### Fix
+
+Two changes:
+
+1. Reduced `max_new_tokens` from 256 to 128 in `src/inference_slm.py` — still 2× the original, giving the model more room to produce label keywords without being excessively slow.
+
+2. Increased `max_run` from 7,200s (2 hours) to 14,400s (4 hours) in `submit_inference.py` to provide more headroom.
+
+```python
+# src/inference_slm.py
+# Before
+parser.add_argument("--max_new_tokens", type=int, default=256)
+# After
+parser.add_argument("--max_new_tokens", type=int, default=128)
+
+# submit_inference.py
+# Before
+max_run=7200,  # 2 hour max
+# After
+max_run=14400,  # 4 hour max
+```
+
+New jobs submitted:
+- `telco-rca-infer-qwen3-14b-2026-03-08-23-20-54-296`
+- `telco-rca-infer-gemma-3-12b-it-2026-03-08-23-20-55-358`
