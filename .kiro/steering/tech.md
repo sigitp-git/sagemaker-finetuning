@@ -23,7 +23,7 @@
 ## Models
 - `mistralai/Mistral-Nemo-Base-2407` (Ministral 3 14B) — QLoRA 4-bit
 - `Qwen/Qwen3-14B` — QLoRA 4-bit
-- `google/gemma-3-12b-pt` — BF16 LoRA
+- `google/gemma-3-12b-pt` — QLoRA 4-bit (originally planned BF16 LoRA, OOM'd on A10G)
 
 ## Reporting
 - HTML report — self-contained static file with metrics tables, generated from `results.json`
