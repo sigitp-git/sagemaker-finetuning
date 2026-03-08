@@ -47,6 +47,7 @@ All steps use AWS managed services, with Amazon SageMaker Training Jobs as the p
      - [6.5.5 Results — SLM Evaluation](#655-results--slm-evaluation)
      - [6.5.6 Root Cause Analysis — Why Qwen3 and Gemma Failed](#656-root-cause-analysis--why-qwen3-and-gemma-failed)
      - [6.5.7 Improvement Options for Qwen3 and Gemma](#657-improvement-options-for-qwen3-and-gemma)
+     - [6.5.8 Option B Implementation — Retrain with Instruction-Tuned Models](#658-option-b-implementation--retrain-with-instruction-tuned-models)
 7. [Validate with Real Operator Data](#7-validate-with-real-operator-data)
 8. [Deploy and Run the Ensemble](#8-deploy-and-run-the-ensemble)
    - [8.1 SageMaker Real-Time Endpoint](#81-sagemaker-real-time-endpoint)
@@ -1250,9 +1251,9 @@ There are a few approaches to fix this, ranging from quick wins to more involved
 - For Qwen3: The model IS reasoning correctly in many cases — it just outputs verbose text instead of JSON. We could improve `extract_root_cause_from_text` in `src/filter.py` to better parse the failure type labels from free-form text. This is a band-aid but could significantly boost Qwen3's score.
 - For Gemma: Won't help — empty outputs mean the model isn't generating anything.
 
-**Option B — Use instruction-tuned base models (retrain)**
+**Option B — Use instruction-tuned base models (retrain)** ✅ CHOSEN
 
-- Swap `Qwen/Qwen3-14B` → `Qwen/Qwen3-14B-Instruct` (or similar chat variant)
+- Swap `Qwen/Qwen3-14B` → retrain with same model ID (already a unified base+instruct model — no separate `-Instruct` variant exists from Qwen)
 - Swap `google/gemma-3-12b-pt` → `google/gemma-3-12b-it` (instruction-tuned)
 - These models already know how to follow instructions and produce structured output. The LoRA adapter just needs to teach them the domain-specific task, not the output format.
 - Downside: requires retraining and new inference jobs.
@@ -1269,6 +1270,50 @@ There are a few approaches to fix this, ranging from quick wins to more involved
 - For Gemma: Won't help with empty outputs.
 
 > **Recommended approach:** Option A first (improve text extraction for a quick Qwen3 boost), then Option B (instruction-tuned base models) for a proper fix of both. Option C is good practice but Option B alone should solve the problem.
+
+#### 6.5.8 Option B Implementation — Retrain with Instruction-Tuned Models
+
+**What changed:**
+
+| Model | Original | Retrain |
+|-------|----------|---------|
+| Qwen3-14B | `Qwen/Qwen3-14B` | `Qwen/Qwen3-14B` (same — already unified base+instruct) |
+| Gemma 3 12B | `google/gemma-3-12b-pt` (pre-trained) | `google/gemma-3-12b-it` (instruction-tuned) |
+
+**Why Qwen3 keeps the same model ID:** `Qwen/Qwen3-14B` is Qwen's unified model — it has both base and instruction-following capabilities built in (chat template, thinking/non-thinking modes). There is no separate `Qwen3-14B-Instruct` on Hugging Face from the official Qwen org. The issue was not the model itself but the training format interaction. Retraining gives the adapter another chance with the same capable base.
+
+**Why Gemma switches to `-it`:** `google/gemma-3-12b-pt` is a pure pre-trained model with zero instruction-following capability — it produced empty outputs for all 992 test examples. The `-it` (instruction-tuned) variant already understands how to follow prompts and produce structured output, so the LoRA adapter only needs to teach the domain-specific 3GPP RCA task.
+
+**Script changes:**
+
+- `src/train.py` — Added `google/gemma-3-12b-it` to `LORA_CONFIGS` (same QLoRA config: `r=16, alpha=32, targets=[q_proj, v_proj, k_proj, o_proj]`)
+- `submit_training.py` — Added `google/gemma-3-12b-it` to `MODEL_DEFAULTS` (`ml.g5.2xlarge`, QLoRA 4-bit)
+- `submit_inference.py` — Added `google/gemma-3-12b-it` to `MODEL_DEFAULTS` (`ml.g5.2xlarge`)
+
+**Submit retraining jobs:**
+
+```bash
+# Retrain Qwen3-14B (same model, new adapter)
+python3 submit_training.py \
+  --role arn:aws:iam::ACCOUNT_ID:role/service-role/AmazonSageMaker-ExecutionRole \
+  --bucket your-telco-llm-bucket \
+  --model_id Qwen/Qwen3-14B \
+  --use_4bit
+
+# Retrain Gemma 3 12B IT (instruction-tuned variant)
+python3 submit_training.py \
+  --role arn:aws:iam::ACCOUNT_ID:role/service-role/AmazonSageMaker-ExecutionRole \
+  --bucket your-telco-llm-bucket \
+  --model_id google/gemma-3-12b-it \
+  --use_4bit \
+  --hf_token $HF_TOKEN
+```
+
+**Poll training status:**
+
+```bash
+aws sagemaker describe-training-job --training-job-name <JOB_NAME> --query TrainingJobStatus --output text
+```
 
 ---
 
