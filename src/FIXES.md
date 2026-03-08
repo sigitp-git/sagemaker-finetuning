@@ -638,3 +638,48 @@ tokens (the JSON array like `["congestion"]`). This teaches the model precisely:
 - Qwen3: Should stop generating verbose reasoning and produce clean JSON arrays
 - Gemma: Should start generating actual output instead of empty strings
 - Mistral-Nemo: Already at 99.7% F1, but may benefit from more focused training signal
+
+
+---
+
+## [2026-03-08] DataCollatorForCompletionOnlyLM not available in DLC's trl version
+
+**Jobs:** `telco-rca-qwen3-14b-2026-03-08-16-32-22-871`, `telco-rca-gemma-3-12b-it-2026-03-08-16-32-36-102`
+**Status:** Both failed immediately
+
+### Error
+
+```
+ImportError: cannot import name 'DataCollatorForCompletionOnlyLM' from 'trl'
+```
+
+### Root Cause
+
+The HuggingFace DLC (`huggingface-pytorch-training:2.8.0-transformers4.56.2-gpu-py312-cu129-ubuntu22.04`)
+ships with a newer version of `trl` that removed `DataCollatorForCompletionOnlyLM` as a public export.
+In newer `trl` versions, completion-only training is handled natively by `SFTTrainer` when the dataset
+uses a prompt-completion format (separate `prompt` and `completion` columns).
+
+### Fix
+
+Replaced the `DataCollatorForCompletionOnlyLM` approach with the modern prompt-completion dataset format:
+
+1. Changed `format_example()` to return `{"prompt": ..., "completion": ...}` instead of `{"text": ...}`
+2. Removed `DataCollatorForCompletionOnlyLM` import and usage
+3. Removed `dataset_text_field="text"` from `SFTConfig` (not needed for prompt-completion format)
+4. `SFTTrainer` auto-detects the prompt-completion columns and computes loss only on completion tokens
+
+```python
+# Before (broken — DataCollatorForCompletionOnlyLM removed in newer trl)
+from trl import SFTTrainer, SFTConfig, DataCollatorForCompletionOnlyLM
+def format_example(example):
+    return {"text": f"...prompt...{label}"}
+collator = DataCollatorForCompletionOnlyLM(response_template="### Root Cause\n", tokenizer=tokenizer)
+trainer = SFTTrainer(..., data_collator=collator)
+
+# After (works with DLC's trl version)
+from trl import SFTTrainer, SFTConfig
+def format_example(example):
+    return {"prompt": "...prompt...\n### Root Cause\n", "completion": label}
+trainer = SFTTrainer(...)  # auto-detects prompt-completion format
+```

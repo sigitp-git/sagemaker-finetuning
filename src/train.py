@@ -19,7 +19,7 @@ import torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model
-from trl import SFTTrainer, SFTConfig, DataCollatorForCompletionOnlyLM
+from trl import SFTTrainer, SFTConfig
 
 LORA_CONFIGS = {
     # model_id -> (r, lora_alpha, target_modules); Mistral-Nemo uses GQA — target all 4 proj layers
@@ -29,23 +29,29 @@ LORA_CONFIGS = {
     "google/gemma-3-12b-it":            (16, 32, ["q_proj", "v_proj", "k_proj", "o_proj"]),
 }
 
-# Response template — SFTTrainer masks loss on all tokens before this string,
-# so the model only learns to generate the completion (JSON array) after it.
-# This is the key fix (Option C) for Qwen3 and Gemma which failed to produce
-# structured output when trained on the full prompt+completion as one text field.
+# Response template — the boundary between prompt and completion.
+# With prompt-completion dataset format, SFTTrainer automatically computes loss
+# only on the completion tokens (Option C fix for Qwen3 and Gemma).
 RESPONSE_TEMPLATE = "### Root Cause\n"
 
 
 def format_example(example):
-    """Convert JSONL example to instruction-following prompt."""
+    """Convert JSONL example to prompt-completion pair.
+
+    Returns separate 'prompt' and 'completion' fields so SFTTrainer
+    computes loss only on the completion tokens (the JSON array).
+    This is the Option C fix — the model learns precisely:
+    'when I see ### Root Cause\\n, output a JSON array.'
+    """
     log = example["log"]
     label = json.dumps(example["root_cause"])
     return {
-        "text": (
+        "prompt": (
             "### Instruction\nAnalyze the following 3GPP signaling log and identify the root cause.\n\n"
             f"### Log\n{log}\n\n"
-            f"### Root Cause\n{label}"
-        )
+            f"### Root Cause\n"
+        ),
+        "completion": label,
     }
 
 
@@ -147,15 +153,9 @@ def main():
         lr_scheduler_type="cosine",
         report_to="none",
         max_length=1024,
-        dataset_text_field="text",
-    )
-
-    # Option C: Use DataCollatorForCompletionOnlyLM so the model only trains on
-    # the completion tokens (the JSON array after "### Root Cause\n"), not the prompt.
-    # This teaches the model precisely: "when you see ### Root Cause\n, output a JSON array."
-    collator = DataCollatorForCompletionOnlyLM(
-        response_template=RESPONSE_TEMPLATE,
-        tokenizer=tokenizer,
+        # Option C: With prompt-completion dataset format, SFTTrainer automatically
+        # computes loss only on the completion tokens. No DataCollator needed.
+        # completion_only_loss defaults to True for prompt-completion datasets.
     )
 
     trainer = SFTTrainer(
@@ -163,7 +163,6 @@ def main():
         args=training_args,
         train_dataset=dataset,
         processing_class=tokenizer,
-        data_collator=collator,
     )
     trainer.train()
 

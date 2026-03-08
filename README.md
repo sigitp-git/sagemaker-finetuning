@@ -1408,33 +1408,46 @@ The model trained on the entire sequence with equal loss weight on every token. 
 Changes to `src/train.py`:
 
 ```python
-# 1. Import the completion-only data collator
-from trl import SFTTrainer, SFTConfig, DataCollatorForCompletionOnlyLM
+# 1. format_example now returns separate prompt and completion fields
+def format_example(example):
+    log = example["log"]
+    label = json.dumps(example["root_cause"])
+    return {
+        "prompt": (
+            "### Instruction\nAnalyze the following 3GPP signaling log "
+            "and identify the root cause.\n\n"
+            f"### Log\n{log}\n\n"
+            f"### Root Cause\n"
+        ),
+        "completion": label,
+    }
 
-# 2. Define the response template — the boundary between prompt and completion
-RESPONSE_TEMPLATE = "### Root Cause\n"
-
-# 3. Create the collator and pass it to SFTTrainer
-collator = DataCollatorForCompletionOnlyLM(
-    response_template=RESPONSE_TEMPLATE,
-    tokenizer=tokenizer,
+# 2. SFTConfig — no dataset_text_field needed; SFTTrainer auto-detects
+#    prompt-completion format and computes loss only on completion tokens
+training_args = SFTConfig(
+    ...,
+    max_length=1024,
+    # completion_only_loss defaults to True for prompt-completion datasets
 )
 
+# 3. SFTTrainer — no custom data_collator needed
 trainer = SFTTrainer(
     model=model,
     args=training_args,
     train_dataset=dataset,
     processing_class=tokenizer,
-    data_collator=collator,  # <-- masks loss on prompt tokens
 )
 ```
 
+> **Note:** The initial implementation used `DataCollatorForCompletionOnlyLM` from `trl`, but this class was removed in newer `trl` versions (the DLC has `trl` bundled with `transformers 4.56.2`). The modern approach is to use a prompt-completion dataset format — `SFTTrainer` automatically detects the `prompt`/`completion` columns and computes loss only on the completion tokens via its internal `DataCollatorForLanguageModeling` with `completion_mask`.
+
 **How it works:**
 
-1. The collator tokenizes `"### Root Cause\n"` and finds its token position in each training example
-2. All tokens before and including the template get `labels=-100` (PyTorch's ignore index for cross-entropy)
-3. Only the completion tokens (e.g., `["congestion"]`) contribute to the loss
-4. The model learns precisely: "when I see `### Root Cause\n`, output a JSON array"
+1. `format_example()` returns `{"prompt": "### Instruction\n...\n### Root Cause\n", "completion": '["congestion"]'}`
+2. `SFTTrainer` detects the prompt-completion format and creates a `completion_mask` for each example
+3. The internal data collator sets `labels=-100` for all prompt tokens (PyTorch's ignore index)
+4. Only the completion tokens (the JSON array) contribute to the cross-entropy loss
+5. The model learns precisely: "when I see `### Root Cause\n`, output a JSON array"
 
 **Why this should fix Qwen3 and Gemma:**
 
