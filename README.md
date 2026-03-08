@@ -1282,7 +1282,14 @@ There are a few approaches to fix this, ranging from quick wins to more involved
 
 **Why Qwen3 keeps the same model ID:** `Qwen/Qwen3-14B` is Qwen's unified model — it has both base and instruction-following capabilities built in (chat template, thinking/non-thinking modes). There is no separate `Qwen3-14B-Instruct` on Hugging Face from the official Qwen org. The issue was not the model itself but the training format interaction. Retraining gives the adapter another chance with the same capable base.
 
-**Why Gemma switches to `-it`:** `google/gemma-3-12b-pt` is a pure pre-trained model with zero instruction-following capability — it produced empty outputs for all 992 test examples. The `-it` (instruction-tuned) variant already understands how to follow prompts and produce structured output, so the LoRA adapter only needs to teach the domain-specific 3GPP RCA task.
+**What do `-pt` and `-it` mean?** Google's Gemma 3 model family uses a naming convention to distinguish training stages:
+
+- `-pt` (pre-trained) — The raw base model trained only on next-token prediction over a large text corpus. It has learned language and knowledge but has no concept of instructions, prompts, or structured output. It completes text statistically — given a prompt, it continues writing in whatever style the training data suggests. This is why `gemma-3-12b-pt` produced empty outputs: it never learned that `### Root Cause\n` means "output a JSON array."
+- `-it` (instruction-tuned) — The same base model, further fine-tuned on instruction-response pairs using techniques like RLHF (Reinforcement Learning from Human Feedback) or DPO (Direct Preference Optimization). It understands prompt/response structure, follows instructions, and produces formatted output. This is the variant used in chatbots and assistants.
+
+The key insight: when fine-tuning with LoRA, the adapter is small (< 1% of parameters) and can only nudge the model's behavior — it cannot teach fundamental capabilities like instruction-following from scratch. Starting from `-it` means the adapter only needs to teach the domain-specific 3GPP RCA classification task, not the entire concept of "read a prompt and produce structured JSON."
+
+**Why Gemma switches to `-it`:** `google/gemma-3-12b-pt` produced empty outputs for all 992 test examples — the pre-trained base simply doesn't know how to follow instructions. The `-it` variant already understands prompt/response structure, so the LoRA adapter can focus entirely on teaching the 3GPP RCA domain task.
 
 **Script changes:**
 
