@@ -141,6 +141,8 @@ def main():
         prompts = [PROMPT_TEMPLATE.format(log=ex["log"]) for ex in batch]
 
         inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True, max_length=960)
+        # Remove token_type_ids — not all models accept them (e.g. Mistral)
+        inputs.pop("token_type_ids", None)
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
         with torch.no_grad():
