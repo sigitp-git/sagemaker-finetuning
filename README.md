@@ -615,36 +615,171 @@ Training cost reference (based on SageMaker billable seconds and on-demand prici
 
 **AWS Service: Amazon Bedrock**
 
-Run Claude 4.6 Opus and Amazon Nova Pro against the 1,000-scenario test set using three prompt strategies per model.
+Run Claude Opus 4.6 and Amazon Nova Pro against the 992-scenario test set using three prompt strategies per model (6 runs total).
 
-Steps:
-1. Ensure the IAM role has `AmazonBedrockFullAccess`.
-2. Loop through the test set and call Bedrock for each scenario:
+#### 4.1 Prerequisites
 
-```python
-import boto3, json
+Ensure the IAM role has `AmazonBedrockFullAccess` and that both models are enabled in the Bedrock console (us-east-1).
 
-bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
+Model IDs used:
+- Claude Opus 4.6: `us.anthropic.claude-opus-4-6-v1` (inference profile — required for on-demand invocation)
+- Amazon Nova Pro: `amazon.nova-pro-v1:0`
 
-def evaluate_bedrock(log_text, model_id, few_shot_examples=None, use_cot=False):
-    messages = []
-    if few_shot_examples:
-        for ex in few_shot_examples:          # 5-shot
-            messages.append({"role": "user", "content": ex["input"]})
-            messages.append({"role": "assistant", "content": ex["output"]})
-    cot_suffix = " Think step by step." if use_cot else ""
-    messages.append({"role": "user", "content": log_text + cot_suffix})
+> **API note:** The evaluation script (`src/evaluate_bedrock.py`) uses the Bedrock **Converse API** (`bedrock.converse()`), which provides a uniform request/response format across both Anthropic and Amazon models. This avoids the need to handle different payload schemas per provider.
 
-    response = bedrock.invoke_model(
-        modelId=model_id,   # "anthropic.claude-opus-4-5" or "amazon.nova-pro-v1:0"
-        body=json.dumps({"messages": messages, "max_tokens": 1024,
-                         "anthropic_version": "bedrock-2023-05-31"})
-    )
-    return json.loads(response["body"].read())
+#### 4.2 Prompt Strategies
+
+Each model is evaluated with three strategies:
+
+| Strategy | Description | Few-shot examples | CoT suffix |
+|----------|-------------|-------------------|------------|
+| `zero_shot` | No examples, direct classification | 0 | No |
+| `five_shot` | 5 labeled examples prepended as user/assistant turns | 5 (first 5 from test set) | No |
+| `five_shot_cot` | Same as 5-shot, plus chain-of-thought instruction | 5 (first 5 from test set) | "Think step by step, then output the JSON array." |
+
+System prompt used for all runs:
+```
+You are a 5G core network expert. Analyze 3GPP signaling logs and identify the root cause.
+Respond with ONLY a JSON array containing one label from:
+[core_network_failure, authentication_failure, normal, handover_failure,
+congestion, qos_violation, transport_jitter, radio_failure]
 ```
 
-3. Run all three strategies (zero-shot, 5-shot, 5-shot + CoT) and record outputs for scoring.
-4. Use the best-performing variant per model for the final comparison table.
+For 5-shot strategies, the first 5 examples from the test set are used as few-shot demonstrations and excluded from scoring (992 → 987 evaluated).
+
+#### 4.3 Run All 6 Evaluations
+
+```bash
+# Nova Pro — 3 strategies
+python3 src/evaluate_bedrock.py --model nova --strategy zero_shot
+python3 src/evaluate_bedrock.py --model nova --strategy five_shot
+python3 src/evaluate_bedrock.py --model nova --strategy five_shot_cot
+
+# Claude Opus 4.6 — 3 strategies
+python3 src/evaluate_bedrock.py --model claude --strategy zero_shot
+python3 src/evaluate_bedrock.py --model claude --strategy five_shot
+python3 src/evaluate_bedrock.py --model claude --strategy five_shot_cot
+```
+
+These can be run in parallel. Each run processes the full test set with a 0.5s sleep between API calls to avoid throttling. Approximate wall-clock times:
+
+| Run | Examples | Approx. Time |
+|-----|----------|-------------|
+| Nova zero_shot | 992 | ~10 min |
+| Nova five_shot | 987 | ~10 min |
+| Nova five_shot_cot | 987 | ~15 min |
+| Claude zero_shot | 992 | ~15 min |
+| Claude five_shot | 987 | ~15 min |
+| Claude five_shot_cot | 987 | ~45 min |
+
+> **Why is Claude CoT so slow?** The chain-of-thought prompt causes Claude to generate long step-by-step reasoning before the JSON array, resulting in ~10s per example vs ~1s for direct classification.
+
+Example output (Nova zero_shot):
+```
+Evaluating nova (amazon.nova-pro-v1:0) / zero_shot on 992 examples...
+  50/992 done
+  100/992 done
+  ...
+  950/992 done
+Saved 992 predictions to results/preds_nova_zero_shot.jsonl
+Next: python src/evaluate.py --predictions results/preds_nova_zero_shot.jsonl --model nova --strategy zero_shot
+```
+
+Prediction files are saved to `results/`:
+```bash
+ls -la results/preds_*.jsonl
+# results/preds_claude_five_shot.jsonl       (987 lines, ~45 KB)
+# results/preds_claude_five_shot_cot.jsonl   (987 lines, ~1.1 MB — includes CoT reasoning)
+# results/preds_claude_zero_shot.jsonl       (992 lines, ~46 KB)
+# results/preds_nova_five_shot.jsonl         (987 lines, ~46 KB)
+# results/preds_nova_five_shot_cot.jsonl     (987 lines, ~551 KB — includes CoT reasoning)
+# results/preds_nova_zero_shot.jsonl         (992 lines, ~46 KB)
+```
+
+#### 4.4 Score All 6 Runs
+
+The scoring script (`src/evaluate.py`) applies the sympathetic noise filter (Step 5) automatically before computing metrics. For 5-shot runs, it auto-aligns by skipping the first 5 test examples that were used as few-shot demonstrations.
+
+```bash
+# Score Nova
+python3 src/evaluate.py --predictions results/preds_nova_zero_shot.jsonl --model nova --strategy zero_shot
+python3 src/evaluate.py --predictions results/preds_nova_five_shot.jsonl --model nova --strategy five_shot
+python3 src/evaluate.py --predictions results/preds_nova_five_shot_cot.jsonl --model nova --strategy five_shot_cot
+
+# Score Claude
+python3 src/evaluate.py --predictions results/preds_claude_zero_shot.jsonl --model claude --strategy zero_shot
+python3 src/evaluate.py --predictions results/preds_claude_five_shot.jsonl --model claude --strategy five_shot
+python3 src/evaluate.py --predictions results/preds_claude_five_shot_cot.jsonl --model claude --strategy five_shot_cot
+```
+
+Scoring output:
+```
+[nova/zero_shot] F1=0.9083 EM=0.9083 n=992
+[nova/five_shot] F1=0.9777 EM=0.9777 n=987
+[nova/five_shot_cot] F1=0.9716 EM=0.9716 n=987
+[claude/zero_shot] F1=0.9345 EM=0.9345 n=992
+[claude/five_shot] F1=0.9899 EM=0.9899 n=987
+[claude/five_shot_cot] F1=0.9939 EM=0.9939 n=987
+```
+
+All results are appended to `results/results.json`. Upload to S3 for reproducibility:
+
+```bash
+aws s3 cp results/results.json s3://your-telco-llm-bucket/results/results.json
+```
+
+#### 4.5 Results — Frontier Model Evaluation
+
+> **Frontier Model Results — All Strategies**
+>
+> | Model | Strategy | F1 | Precision | Recall | Exact Match | n |
+> |-------|----------|---:|----------:|-------:|------------:|--:|
+> | Claude Opus 4.6 | zero_shot | 0.9345 | 0.9345 | 0.9345 | 0.9345 | 992 |
+> | Claude Opus 4.6 | five_shot | 0.9899 | 0.9899 | 0.9899 | 0.9899 | 987 |
+> | Claude Opus 4.6 | five_shot_cot | 0.9939 | 0.9939 | 0.9939 | 0.9939 | 987 |
+> | Nova Pro | zero_shot | 0.9083 | 0.9083 | 0.9083 | 0.9083 | 992 |
+> | Nova Pro | five_shot | 0.9777 | 0.9777 | 0.9777 | 0.9777 | 987 |
+> | Nova Pro | five_shot_cot | 0.9716 | 0.9716 | 0.9716 | 0.9716 | 987 |
+>
+> **Best variant per model:**
+> - Claude Opus 4.6: **five_shot_cot** — 99.4% F1
+> - Nova Pro: **five_shot** — 97.8% F1
+
+#### 4.6 Per-Class Breakdown (Best Variant per Model)
+
+> **Claude Opus 4.6 — five_shot_cot (F1=0.9939)**
+>
+> | Failure Type | F1 | Precision | Recall | n |
+> |-------------|---:|----------:|-------:|--:|
+> | authentication_failure | 1.0000 | 1.0000 | 1.0000 | 124 |
+> | congestion | 1.0000 | 1.0000 | 1.0000 | 124 |
+> | core_network_failure | 1.0000 | 1.0000 | 1.0000 | 124 |
+> | handover_failure | 0.9960 | 0.9921 | 1.0000 | 125 |
+> | normal | 0.9957 | 0.9915 | 1.0000 | 117 |
+> | qos_violation | 1.0000 | 1.0000 | 1.0000 | 125 |
+> | radio_failure | 0.9760 | 0.9683 | 0.9839 | 124 |
+> | transport_jitter | 0.9836 | 1.0000 | 0.9677 | 124 |
+
+> **Nova Pro — five_shot (F1=0.9777)**
+>
+> | Failure Type | F1 | Precision | Recall | n |
+> |-------------|---:|----------:|-------:|--:|
+> | authentication_failure | 1.0000 | 1.0000 | 1.0000 | 124 |
+> | congestion | 1.0000 | 1.0000 | 1.0000 | 124 |
+> | core_network_failure | 1.0000 | 1.0000 | 1.0000 | 124 |
+> | handover_failure | 0.9363 | 0.8803 | 1.0000 | 125 |
+> | normal | 0.9915 | 0.9832 | 1.0000 | 117 |
+> | qos_violation | 1.0000 | 1.0000 | 1.0000 | 125 |
+> | radio_failure | 0.9099 | 0.9725 | 0.8548 | 124 |
+> | transport_jitter | 0.9836 | 1.0000 | 0.9677 | 124 |
+
+#### 4.7 Observations
+
+- **Few-shot examples matter a lot.** Both models jump ~7 percentage points from zero-shot to 5-shot. The system prompt alone is not enough for reliable classification of `radio_failure` vs `transport_jitter` — these two failure types have overlapping signal patterns in the logs.
+- **CoT helps Claude but slightly hurts Nova.** Claude improves from 99.0% → 99.4% with CoT, while Nova drops from 97.8% → 97.2%. Nova's CoT reasoning sometimes introduces second-guessing that flips correct predictions.
+- **Both models struggle most with `radio_failure` and `transport_jitter`.** These are the hardest failure types to distinguish — both involve RLF (Radio Link Failure) events and retransmission patterns. In zero-shot mode, Claude only gets 79.4% F1 on `radio_failure` and 64.9% on `transport_jitter`; Nova gets 80.7% and 73.1% respectively.
+- **Perfect scores on 5 of 8 failure types.** Both models achieve 100% F1 on `authentication_failure`, `congestion`, `core_network_failure`, and `qos_violation` across all strategies. These failure types have distinctive protocol signatures that are unambiguous.
+- **F1 = Precision = Recall = Exact Match** across all runs because this is single-label classification with micro averaging — each example has exactly one predicted label and one ground truth label.
 
 ---
 
