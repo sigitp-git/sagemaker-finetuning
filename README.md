@@ -48,6 +48,7 @@ All steps use AWS managed services, with Amazon SageMaker Training Jobs as the p
      - [6.5.6 Root Cause Analysis — Why Qwen3 and Gemma Failed](#656-root-cause-analysis--why-qwen3-and-gemma-failed)
      - [6.5.7 Improvement Options for Qwen3 and Gemma](#657-improvement-options-for-qwen3-and-gemma)
      - [6.5.8 Option B Implementation — Retrain with Instruction-Tuned Models](#658-option-b-implementation--retrain-with-instruction-tuned-models)
+     - [6.5.9 Results — Option B Retrain Evaluation](#659-results--option-b-retrain-evaluation)
 7. [Validate with Real Operator Data](#7-validate-with-real-operator-data)
 8. [Deploy and Run the Ensemble](#8-deploy-and-run-the-ensemble)
    - [8.1 SageMaker Real-Time Endpoint](#81-sagemaker-real-time-endpoint)
@@ -1321,6 +1322,64 @@ python3 submit_training.py \
 ```bash
 aws sagemaker describe-training-job --training-job-name <JOB_NAME> --query TrainingJobStatus --output text
 ```
+
+**Training jobs (Option B retrain):**
+
+| Model | Job Name | Instance | Duration | Status |
+|-------|----------|----------|----------|--------|
+| Qwen3-14B | `telco-rca-qwen3-14b-2026-03-08-06-00-46-936` | ml.g5.12xlarge | ~95 min | ✅ Completed |
+| Gemma 3 12B IT | `telco-rca-gemma-3-12b-it-2026-03-08-06-00-59-550` | ml.g5.2xlarge | ~100 min | ✅ Completed |
+
+**Inference jobs (Option B retrain):**
+
+| Model | Job Name | Instance | Status |
+|-------|----------|----------|--------|
+| Qwen3-14B | `telco-rca-infer-qwen3-14b-2026-03-08-14-38-24-193` | ml.g5.12xlarge | ✅ Completed |
+| Gemma 3 12B IT | `telco-rca-infer-gemma-3-12b-it-2026-03-08-14-38-38-137` | ml.g5.2xlarge | ✅ Completed |
+
+**Download and score retrained inference results:**
+
+```bash
+# Download Qwen3 retrain output
+aws s3 cp s3://your-telco-llm-bucket/inference-output/qwen3-14b/telco-rca-infer-qwen3-14b-2026-03-08-14-38-24-193/output/output.tar.gz /tmp/qwen3-retrain.tar.gz
+mkdir -p /tmp/qwen3-retrain && tar xzf /tmp/qwen3-retrain.tar.gz -C /tmp/qwen3-retrain/
+cp /tmp/qwen3-retrain/preds_qwen3-14b_slm.jsonl results/preds_qwen3-14b_retrain_slm.jsonl
+
+# Download Gemma 3 12B IT output
+aws s3 cp s3://your-telco-llm-bucket/inference-output/gemma-3-12b-it/telco-rca-infer-gemma-3-12b-it-2026-03-08-14-38-38-137/output/output.tar.gz /tmp/gemma-it.tar.gz
+mkdir -p /tmp/gemma-it && tar xzf /tmp/gemma-it.tar.gz -C /tmp/gemma-it/
+cp /tmp/gemma-it/preds_gemma-3-12b-it_slm.jsonl results/preds_gemma-3-12b-it_slm.jsonl
+
+# Score both
+python3 src/evaluate.py --predictions results/preds_qwen3-14b_retrain_slm.jsonl --test data/test.jsonl --model qwen3-14b-retrain --strategy slm
+# [qwen3-14b-retrain/slm] F1=0.1714 EM=0.1714 n=992
+
+python3 src/evaluate.py --predictions results/preds_gemma-3-12b-it_slm.jsonl --test data/test.jsonl --model gemma-3-12b-it --strategy slm
+# [gemma-3-12b-it/slm] F1=0.119 EM=0.119 n=992
+```
+
+#### 6.5.9 Results — Option B Retrain Evaluation
+
+| Model | Base | F1 | Precision | Recall | Exact Match | n |
+|-------|------|----|-----------|--------|-------------|---|
+| Qwen3-14B (retrain) | `Qwen/Qwen3-14B` | 17.14% | 17.14% | 17.14% | 17.14% | 992 |
+| Gemma 3 12B IT | `google/gemma-3-12b-it` | 11.90% | 11.90% | 11.90% | 11.90% | 992 |
+
+**Comparison with original run:**
+
+| Model | Original F1 | Retrain F1 | Change |
+|-------|-------------|------------|--------|
+| Qwen3-14B | 17.24% | 17.14% | −0.10% (no change) |
+| Gemma 3 12B | 11.90% (`-pt`) | 11.90% (`-it`) | 0.00% (no change) |
+
+**Conclusion: Option B failed.** Switching to instruction-tuned base models did not improve results for either model:
+
+- **Qwen3-14B** — Identical score (17.14% vs 17.24%). The model was already instruction-capable (`Qwen/Qwen3-14B` is a unified base+instruct model). The problem is not the base model — it's the training format. Qwen3 still generates verbose reasoning text instead of clean JSON arrays, and only the `congestion` label gets extracted (67/992 correct).
+- **Gemma 3 12B IT** — Identical score (11.90%). Despite switching from `-pt` to `-it`, the model still produces empty outputs for all 992 examples. The instruction-tuning in the base model is being overridden or ignored by the LoRA adapter trained with the current `format_example()` approach.
+
+**Root cause confirmed:** The issue is **Option C — the training data format**. The current `SFTTrainer` setup trains on the full prompt+completion as a single `text` field. The model learns to predict the entire sequence (including the prompt), but at inference time it only sees the prompt up to `### Root Cause\n` and must generate the rest. There is no explicit signal about where the "answer" starts.
+
+**Next step:** Implement Option C — use `SFTTrainer`'s `response_template` parameter or switch to a chat/completion format so the model only trains on the completion tokens (the JSON array after `### Root Cause\n`). This teaches the model precisely: "when you see `### Root Cause\n`, output a JSON array."
 
 ---
 
