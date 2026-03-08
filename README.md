@@ -826,6 +826,22 @@ def filter_sympathetic_noise(predicted_codes: list) -> list:
     return filtered if filtered else ["normal"]
 ```
 
+#### 5.1 How the Sympathetic Noise Codes Were Identified
+
+These codes come from 3GPP protocol domain knowledge about which events are "sympathetic" (secondary/consequential) rather than root causes. They fall into four categories:
+
+- **Heartbeat/keepalive timeouts** (`HEARTBEAT_TIMEOUT`, `KEEPALIVE_FAIL`, `KEEPALIVE_TIMEOUT`, `PFCP_HEARTBEAT_TIMEOUT`, `N2_HEARTBEAT_TIMEOUT`, `N11_HEARTBEAT_TIMEOUT`) — these fire when a network function stops responding, but they're a symptom of the actual failure, not the cause. If the AMF goes down, every interface heartbeat to it will timeout.
+
+- **Cascading/secondary events** (`SECONDARY_ALARM`, `CASCADING_FAILURE`) — explicitly consequential. When one component fails, downstream components raise secondary alarms.
+
+- **Retransmission/recovery noise** (`RETRANSMISSION`, `DUPLICATE_NAS`, `RLC_RETRANSMISSION`, `HARQ_NACK`, `BEAM_FAILURE_RECOVERY`) — these are the radio/transport layer's automatic retry mechanisms. They appear in logs whenever there's any disruption but don't indicate what caused the disruption.
+
+- **Timer/measurement noise** (`TIMER_EXPIRY`, `SPURIOUS_MEASUREMENT`) — generic timer expirations and measurement reports that don't point to a specific root cause.
+
+The key insight is that when a real failure happens (e.g., `authentication_failure`), the logs will also contain a bunch of these sympathetic events — heartbeats timing out, retransmissions firing, secondary alarms cascading. Without the filter, a model might predict `["authentication_failure", "HEARTBEAT_TIMEOUT", "RETRANSMISSION"]` and get penalized for the extra labels, even though it correctly identified the root cause.
+
+These specific codes were chosen based on what appears in the synthetic training data (`data/train.jsonl` and `data/test.jsonl`) — they're the noise events that the data generation script (`src/generate_data.py`) injects into the logs alongside the actual root cause.
+
 The filter also includes `extract_root_cause_from_text()` which parses free-form model output (e.g., CoT reasoning text) into a structured label list by searching for JSON arrays or known label strings in the response text. This is used by `evaluate_bedrock.py` during inference and by `evaluate.py` during scoring.
 
 ---
