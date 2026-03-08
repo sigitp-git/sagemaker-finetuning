@@ -1032,7 +1032,9 @@ The model generates the root cause label, which is parsed and saved as JSONL mat
 
 ##### Submit Inference Jobs
 
-Use `submit_inference.py` to submit a SageMaker Processing Job for each model:
+Use `submit_inference.py` to submit a SageMaker Training Job for each model:
+
+> **Note:** `submit_inference.py` uses the Training Job API (not Processing Jobs) because SageMaker Processing and Training have separate service quotas. The default account quota for `ml.g5.2xlarge` Processing Jobs is 0 — using Training Jobs avoids the need for a separate quota request. You may need to request a quota increase for `ml.g5.2xlarge for training job usage` if your account limit is 1 (default). We requested an increase to 3 instances via [AWS Service Quotas](https://console.aws.amazon.com/servicequotas/) to run Mistral and Gemma inference concurrently.
 
 ```bash
 # Mistral-Nemo (1× A10G)
@@ -1053,6 +1055,22 @@ python3 submit_inference.py \
   --bucket your-telco-llm-bucket \
   --model_id google/gemma-3-12b-pt \
   --hf_token $HF_TOKEN
+```
+
+##### Submitted Inference Jobs
+
+| Model | Job Name | Instance |
+|-------|----------|----------|
+| Mistral-Nemo | `telco-rca-infer-mistral-nemo-base-24-2026-03-08-03-49-49-993` | ml.g5.2xlarge |
+| Qwen3-14B | `telco-rca-infer-qwen3-14b-2026-03-08-03-50-02-217` | ml.g5.12xlarge |
+| Gemma 3 12B | `telco-rca-infer-gemma-3-12b-pt-2026-03-08-03-53-03-117` | ml.g5.2xlarge |
+
+Poll status:
+
+```bash
+aws sagemaker describe-training-job --training-job-name telco-rca-infer-mistral-nemo-base-24-2026-03-08-03-49-49-993 --query TrainingJobStatus --output text
+aws sagemaker describe-training-job --training-job-name telco-rca-infer-qwen3-14b-2026-03-08-03-50-02-217 --query TrainingJobStatus --output text
+aws sagemaker describe-training-job --training-job-name telco-rca-infer-gemma-3-12b-pt-2026-03-08-03-53-03-117 --query TrainingJobStatus --output text
 ```
 
 ##### Score SLM Predictions
