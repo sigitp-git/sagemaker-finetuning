@@ -563,7 +563,7 @@ Step 325  | loss: 5.1441 | grad_norm: 0.00 | lr: 5.202e-09 | epoch: 2.01
 
 **All Three Training Jobs — Completed**
 
-![SageMaker Training Jobs — All Completed](images/sagemaker-training-jobs-completed.png)
+![SageMaker Training Jobs - All Completed](images/sagemaker-training-jobs-completed.png)
 
 > **Training Summary — All Models**
 >
