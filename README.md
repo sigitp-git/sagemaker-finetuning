@@ -28,6 +28,7 @@ All steps use AWS managed services, with Amazon SageMaker Training Jobs as the p
    - [6.2 How Scoring Works](#62-how-scoring-works)
    - [6.3 Metrics Definitions](#63-metrics-definitions)
    - [6.4 Results Storage](#64-results-storage)
+   - [6.5 SLM Evaluation Options](#65-slm-evaluation-options)
 7. [Validate with Real Operator Data](#7-validate-with-real-operator-data)
 8. [Deploy and Run the Ensemble](#8-deploy-and-run-the-ensemble)
 9. [Generate Reports](#9-generate-reports)
@@ -1000,6 +1001,78 @@ The file is a JSON array where each entry contains:
 ```
 
 This file will grow as fine-tuned SLM results are added in subsequent steps.
+
+#### 6.5 SLM Evaluation Options
+
+To evaluate the fine-tuned SLMs, we have a few options:
+
+| Option | Method | Description |
+|--------|--------|-------------|
+| 1 | **SageMaker Processing Job** | Submit a batch inference job that loads each base model + adapter from S3, runs predictions on the test set, and writes results back to S3. Similar to how we submitted training jobs. |
+| 2 | **SageMaker Batch Transform** | Deploy a temporary endpoint, run all 992 examples through it, then tear it down. |
+| 3 | **EC2 GPU instance** | Spin up a `g5.2xlarge`, SSH in, download adapters, run inference manually. |
+
+We use **Option 1** (SageMaker Processing Job) for consistency with the training workflow.
+
+##### Inference Script
+
+The inference entry point (`src/inference_slm.py`) loads the base model in QLoRA 4-bit, merges the LoRA adapter from S3, and runs predictions on all 992 test examples. It uses the same prompt template as `train.py`:
+
+```
+### Instruction
+Analyze the following 3GPP signaling log and identify the root cause.
+
+### Log
+{log}
+
+### Root Cause
+```
+
+The model generates the root cause label, which is parsed and saved as JSONL matching the format expected by `src/evaluate.py`.
+
+##### Submit Inference Jobs
+
+Use `submit_inference.py` to submit a SageMaker Processing Job for each model:
+
+```bash
+# Mistral-Nemo (1× A10G)
+python3 submit_inference.py \
+  --role arn:aws:iam::ACCOUNT_ID:role/service-role/AmazonSageMaker-ExecutionRole \
+  --bucket your-telco-llm-bucket \
+  --model_id mistralai/Mistral-Nemo-Base-2407
+
+# Qwen3-14B (4× A10G)
+python3 submit_inference.py \
+  --role arn:aws:iam::ACCOUNT_ID:role/service-role/AmazonSageMaker-ExecutionRole \
+  --bucket your-telco-llm-bucket \
+  --model_id Qwen/Qwen3-14B
+
+# Gemma 3 12B (1× A10G, requires HF token for gated model)
+python3 submit_inference.py \
+  --role arn:aws:iam::ACCOUNT_ID:role/service-role/AmazonSageMaker-ExecutionRole \
+  --bucket your-telco-llm-bucket \
+  --model_id google/gemma-3-12b-pt \
+  --hf_token $HF_TOKEN
+```
+
+##### Score SLM Predictions
+
+After each inference job completes, score the predictions:
+
+```bash
+# Download predictions from S3
+aws s3 cp s3://your-telco-llm-bucket/results/preds_mistral-nemo-base-2407_slm.jsonl results/
+aws s3 cp s3://your-telco-llm-bucket/results/preds_qwen3-14b_slm.jsonl results/
+aws s3 cp s3://your-telco-llm-bucket/results/preds_gemma-3-12b-pt_slm.jsonl results/
+
+# Score each model
+python3 src/evaluate.py --predictions results/preds_mistral-nemo-base-2407_slm.jsonl --model mistral --strategy slm
+python3 src/evaluate.py --predictions results/preds_qwen3-14b_slm.jsonl --model qwen3 --strategy slm
+python3 src/evaluate.py --predictions results/preds_gemma-3-12b-pt_slm.jsonl --model gemma --strategy slm
+
+# Upload updated results
+aws s3 cp results/results.json s3://your-telco-llm-bucket/results/results.json
+```
 
 ---
 
