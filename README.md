@@ -1870,6 +1870,128 @@ python3 submit_training.py \
 aws sagemaker describe-training-job --training-job-name <JOB_NAME> --query TrainingJobStatus --output text
 ```
 
+**Option H training job:**
+
+| Job Name | Instance | Duration | Status |
+|----------|----------|----------|--------|
+| `telco-rca-qwen3-14b-2026-03-09-15-11-04-303` | ml.g5.12xlarge | ~106 min | Completed |
+
+**Submit Option H inference job:**
+
+```bash
+python3 submit_inference.py \
+  --role arn:aws:iam::ACCOUNT_ID:role/service-role/AmazonSageMaker-ExecutionRole \
+  --bucket your-telco-llm-bucket \
+  --model_id Qwen/Qwen3-14B \
+  --use_4bit
+```
+
+**First inference run — thinking mode issue:**
+
+The first inference run (`telco-rca-infer-qwen3-14b-2026-03-09-17-34-20-358`) scored only 35.48% F1. Despite the chat template training, Qwen3's built-in "thinking mode" activated at inference time, producing `<think>...</think>` reasoning blocks that consumed most of the 128-token generation budget before the model could output the JSON array.
+
+**The `/no_think` fix:**
+
+Qwen3 supports a `/no_think` suffix in the system prompt to disable thinking mode. Added this to the inference prompt template in `src/inference_slm.py`:
+
+```python
+SYSTEM_PROMPT = (
+    "You are a 3GPP root cause analysis assistant. ..."
+    'Example: ["congestion"] /no_think'
+)
+```
+
+Also added `<think>...</think>` stripping to `src/filter.py` to prevent false positives from any residual reasoning text:
+
+```python
+import re
+text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+```
+
+**Second inference run (with `/no_think`):**
+
+| Job Name | Instance | Duration | Status |
+|----------|----------|----------|--------|
+| `telco-rca-infer-qwen3-14b-2026-03-09-21-50-41-472` | ml.g5.12xlarge | ~26 min | Completed |
+
+The `/no_think` run completed in ~26 min vs the thinking-mode run — much faster because the model outputs the JSON array directly without reasoning first.
+
+**Download and score:**
+
+```bash
+# Download inference output
+aws s3 cp s3://your-telco-llm-bucket/output/telco-rca-infer-qwen3-14b-2026-03-09-21-50-41-472/output/output.tar.gz /tmp/optionH2_qwen3/
+tar -xzf /tmp/optionH2_qwen3/output.tar.gz -C /tmp/optionH2_qwen3/
+
+# Copy to results
+cp /tmp/optionH2_qwen3/preds_qwen3-14b_slm.jsonl results/preds_qwen3-14b_optionH_slm.jsonl
+
+# Score
+python3 src/evaluate.py \
+  --predictions results/preds_qwen3-14b_optionH_slm.jsonl \
+  --test data/test.jsonl \
+  --model qwen3-optionH-nothink \
+  --strategy slm
+```
+
+```
+[qwen3-optionH-nothink/slm] F1=0.7742 EM=0.7742 n=992
+```
+
+**Results — Option H (chat template + /no_think):**
+
+| Metric | Score |
+|--------|-------|
+| F1 | 77.42% |
+| Precision | 77.42% |
+| Recall | 77.42% |
+| Exact Match | 77.42% |
+| n | 992 |
+
+**Per-class breakdown:**
+
+| Failure Type | F1 | Precision | Recall | n |
+|---|---|---|---|---|
+| core_network_failure | 98.37% | 100.00% | 96.80% | 125 |
+| authentication_failure | 92.64% | 100.00% | 86.29% | 124 |
+| normal | 62.27% | 45.21% | 100.00% | 118 |
+| handover_failure | 90.35% | 100.00% | 82.40% | 125 |
+| congestion | 90.55% | 89.15% | 92.00% | 125 |
+| qos_violation | 25.17% | 100.00% | 14.40% | 125 |
+| transport_jitter | 65.59% | 100.00% | 48.80% | 125 |
+| radio_failure | 78.86% | 65.10% | 100.00% | 125 |
+
+**Analysis — Option H vs D+E:**
+
+The chat template training improved several classes significantly:
+- `core_network_failure`: 70.69% → 98.37% (+27.68pp) — near perfect
+- `handover_failure`: 86.49% → 90.35% (+3.86pp)
+- `congestion`: 92.54% → 90.55% (−1.99pp) — slight regression
+
+But two classes remain weak:
+- `qos_violation`: 49.10% → 25.17% (−23.93pp) — worsened, only 14.4% recall
+- `transport_jitter`: 82.63% → 65.59% (−17.04pp) — worsened
+
+The model achieves 100% precision on 5 of 8 classes (it rarely predicts a wrong label), but recall is low on `qos_violation` and `transport_jitter` — the model defaults to `normal` instead of recognizing these failure types. The `normal` class has 100% recall but only 45.21% precision, confirming it's the "catch-all" bucket.
+
+**Overall F1 improved only marginally: 76.31% (D+E) → 77.42% (H).** The chat template helped the model produce cleaner JSON output, but the underlying classification accuracy on ambiguous failure types (QoS, transport jitter) did not improve.
+
+**Updated Qwen3 improvement summary:**
+
+| Option | Change | Qwen3 F1 | Δ from Original |
+|--------|--------|----------|-----------------|
+| Original | Baseline | 17.24% | — |
+| B (Instruct base) | Retrain with Qwen3-14B (already unified) | 17.14% | −0.10pp |
+| C (Completion-only) | prompt/completion format | 17.24% | 0.00pp |
+| D+E (Filter + tokens) | Improved filter + 128 tokens | 76.31% | +59.07pp |
+| H (Chat template) | Native `<\|im_start\|>` format + /no_think | 77.42% | +60.18pp |
+
+**Conclusion:**
+
+Option H (chat template + /no_think) is the best Qwen3 configuration at 77.42% F1. This places Qwen3 between Nova zero-shot (90.83%) and Claude zero-shot (93.45%) in the ranking — not yet matching frontier models, but a dramatic improvement from the original 17.24%. The remaining gap is driven by weak recall on `qos_violation` (14.4%) and `transport_jitter` (48.8%), which would require either more training data for these classes or a larger model to resolve.
+
+Mistral-Nemo remains the top SLM at 99.7% F1, outperforming all frontier model configurations.
+
 ---
 
 ### 7. Validate with Real Operator Data

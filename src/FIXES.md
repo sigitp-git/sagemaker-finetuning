@@ -725,3 +725,59 @@ max_run=14400,  # 4 hour max
 New jobs submitted:
 - `telco-rca-infer-qwen3-14b-2026-03-08-23-20-54-296`
 - `telco-rca-infer-gemma-3-12b-it-2026-03-08-23-20-55-358`
+
+
+---
+
+## [2026-03-09] Option H — Qwen3 thinking mode consumed token budget, /no_think fix
+
+**Jobs:**
+- Training: `telco-rca-qwen3-14b-2026-03-09-15-11-04-303` (ml.g5.12xlarge, ~106 min, Completed)
+- Inference (with thinking): `telco-rca-infer-qwen3-14b-2026-03-09-17-34-20-358` (35.48% F1)
+- Inference (with /no_think): `telco-rca-infer-qwen3-14b-2026-03-09-21-50-41-472` (77.42% F1, ~26 min)
+
+### Problem
+
+After retraining Qwen3-14B with its native chat template (`<|im_start|>` / `<|im_end|>` tokens), the first inference run scored only 35.48% F1 — worse than the D+E result (76.31%). The model was generating `<think>...</think>` reasoning blocks before the JSON array, consuming most of the 128-token generation budget. Many outputs were truncated mid-JSON.
+
+### Root Cause
+
+Qwen3 has a built-in "thinking mode" that activates by default when using the chat template format. The model produces extended reasoning inside `<think>` tags before generating the actual answer. With `max_new_tokens=128`, the thinking text consumed the budget before the model could output the complete JSON array.
+
+### Fix
+
+Two changes:
+
+1. Added `/no_think` suffix to the system prompt in `src/inference_slm.py` to disable Qwen3's thinking mode:
+
+```python
+SYSTEM_PROMPT = (
+    "You are a 3GPP root cause analysis assistant. "
+    "Given a signaling log, respond with ONLY a JSON array of root cause labels. "
+    "Valid labels: core_network_failure, authentication_failure, normal, "
+    "handover_failure, congestion, qos_violation, transport_jitter, radio_failure. "
+    'Example: ["congestion"] /no_think'
+)
+```
+
+2. Added `<think>...</think>` stripping to `src/filter.py` before root cause extraction, to prevent false positives from any residual reasoning text:
+
+```python
+import re
+text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+```
+
+### Results
+
+| Run | F1 | Inference Time |
+|-----|-----|---------------|
+| With thinking mode | 35.48% | ~60+ min |
+| With /no_think | 77.42% | ~26 min |
+
+The `/no_think` fix more than doubled the F1 score and halved inference time. The model now outputs clean JSON arrays directly (with empty `<think>\n\n</think>` blocks that get stripped by the filter).
+
+### Impact
+
+- Option H with /no_think is the best Qwen3 configuration: 77.42% F1 (up from 17.24% original)
+- Still below Mistral-Nemo (99.7%) due to weak recall on `qos_violation` (14.4%) and `transport_jitter` (48.8%)
+- The `/no_think` approach is Qwen3-specific — other models are unaffected

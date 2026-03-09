@@ -1218,5 +1218,66 @@
         "n": 125
       }
     }
+  },
+  {
+    "model": "qwen3-optionH-nothink",
+    "strategy": "slm",
+    "metrics": {
+      "f1": 0.7742,
+      "precision": 0.7742,
+      "recall": 0.7742,
+      "exact_match": 0.7742,
+      "n": 992
+    },
+    "per_class": {
+      "core_network_failure": {
+        "f1": 0.9837,
+        "precision": 1.0,
+        "recall": 0.968,
+        "n": 125
+      },
+      "authentication_failure": {
+        "f1": 0.9264,
+        "precision": 1.0,
+        "recall": 0.8629,
+        "n": 124
+      },
+      "normal": {
+        "f1": 0.6227,
+        "precision": 0.4521,
+        "recall": 1.0,
+        "n": 118
+      },
+      "handover_failure": {
+        "f1": 0.9035,
+        "precision": 1.0,
+        "recall": 0.824,
+        "n": 125
+      },
+      "congestion": {
+        "f1": 0.9055,
+        "precision": 0.8915,
+        "recall": 0.92,
+        "n": 125
+      },
+      "qos_violation": {
+        "f1": 0.2517,
+        "precision": 1.0,
+        "recall": 0.144,
+        "n": 125
+      },
+      "transport_jitter": {
+        "f1": 0.6559,
+        "precision": 1.0,
+        "recall": 0.488,
+        "n": 125
+      },
+      "radio_failure": {
+        "f1": 0.7886,
+        "precision": 0.651,
+        "recall": 1.0,
+        "n": 125
+      }
+    }
   }
 ]
