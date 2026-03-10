@@ -53,17 +53,17 @@ All steps use AWS managed services, with Amazon SageMaker Training Jobs as the p
 9. [Deploy and Run the Ensemble](#9-deploy-and-run-the-ensemble)
    - [9.1 SageMaker Real-Time Endpoint](#91-sagemaker-real-time-endpoint)
    - [9.2 EC2 Self-Hosted](#92-ec2-self-hosted)
-   - [9.3 AWS Outposts / Edge](#93-aws-outposts-edge)
+   - [9.3 AWS Outposts and Edge](#93-aws-outposts-and-edge)
 10. [Generate Reports](#10-generate-reports)
     - [10.1 HTML Report](#101-html-report)
     - [10.2 JavaScript PPT Presentation](#102-javascript-ppt-presentation)
-11. [Glossary: Concepts & Acronyms](#glossary-concepts-acronyms)
-    - [Models & Architecture](#models-architecture)
+11. [Glossary - Concepts and Acronyms](#glossary---concepts-and-acronyms)
+    - [Models and Architecture](#models-and-architecture)
     - [Fine-Tuning](#fine-tuning)
     - [Prompting Strategies](#prompting-strategies)
     - [Evaluation Metrics](#evaluation-metrics)
-    - [Telco & 3GPP Concepts](#telco-3gpp-concepts)
-    - [Infrastructure & Cost](#infrastructure-cost)
+    - [Telco and 3GPP Concepts](#telco-and-3gpp-concepts)
+    - [Infrastructure and Cost](#infrastructure-and-cost)
     - [AWS Services](#aws-services)
 
 > For the full execution log including all failed experiments, intermediate results, and debugging details, see [EXECUTION-LOG.md](EXECUTION-LOG.md).
@@ -805,7 +805,7 @@ def infer(log_text):
     return model.generate(**inputs, max_new_tokens=256)
 ```
 
-#### 9.3 AWS Outposts / Edge
+#### 9.3 AWS Outposts and Edge
 
 Deploy the EC2 instance on an [AWS Outpost](https://aws.amazon.com/outposts/) rack inside the operator's data center. The model runs on-premise with no data leaving the facility, meeting data residency requirements.
 
@@ -841,10 +841,10 @@ aws s3 cp reports/ s3://your-telco-llm-bucket/reports/ --recursive
 
 ---
 
-## Glossary: Concepts & Acronyms
+## Glossary - Concepts and Acronyms
 [↑ Back to Table of Contents](#table-of-contents)
 
-### Models & Architecture
+### Models and Architecture
 
 **LLM (Large Language Model)** — A neural network trained on massive text data to understand and generate language. Examples: Claude, GPT-4.
 
@@ -884,7 +884,7 @@ aws s3 cp reports/ s3://your-telco-llm-bucket/reports/ --recursive
 
 **Ground-Truth Test Set** — `data/test.jsonl` (992 examples). Each entry has a `log` field and a known correct `root_cause` label.
 
-### Telco & 3GPP Concepts
+### Telco and 3GPP Concepts
 
 **3GPP** — The international standards body defining mobile network specifications (4G LTE, 5G).
 
@@ -900,7 +900,7 @@ aws s3 cp reports/ s3://your-telco-llm-bucket/reports/ --recursive
 
 **Sympathetic Noise** — Secondary failures triggered as a consequence of a root cause failure (heartbeat timeouts, keepalive failures, cascading errors). Filtering these is critical to accurate RCA.
 
-### Infrastructure & Cost
+### Infrastructure and Cost
 
 **ml.g5.2xlarge** — SageMaker instance with 1× NVIDIA A10G GPU (24GB VRAM). Used for Mistral-Nemo and Gemma.
 
