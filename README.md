@@ -1,6 +1,6 @@
 # SageMaker Fine-Tuning: 14B SLMs for 3GPP Root Cause Analysis
 
-Step-by-step guide for a fine-tuning benchmark that compares fine-tuned 14B SLMs against frontier foundation models on automated root cause analysis of 3GPP protocol logs in 5G SA core networks.
+Step-by-step guide for a fine-tuning benchmark that compares fine-tuned 14B SLMs against frontier foundation models on automated root cause analysis of 3GPP protocol logs in 5G SA networks.
 
 All steps use AWS managed services, with Amazon SageMaker Training Jobs as the primary compute option.
 
