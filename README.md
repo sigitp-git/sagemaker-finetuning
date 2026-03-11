@@ -988,7 +988,7 @@ aws s3 cp reports/ s3://your-telco-llm-bucket/reports/ --recursive
 
 **PEFT** — Parameter-Efficient Fine-Tuning library implementing LoRA and QLoRA.
 
-**CUDA** — NVIDIA's parallel computing platform for GPU computation. Pin to `cu121` to avoid the CUBLAS regression in `cu128`.
+**CUDA** — NVIDIA's parallel computing platform for GPU computation. CUDA versions are bundled with PyTorch as `cuXXX` suffixes (e.g., `cu121` = CUDA 12.1, `cu128` = CUDA 12.8). PyTorch 2.10 built with CUDA 12.8 (`cu128`) introduced a CUBLAS regression. CUBLAS (CUDA Basic Linear Algebra Subroutines) is NVIDIA's GPU-accelerated library for matrix operations — the core math behind every forward pass, backward pass, and weight update in neural network training. The regression caused CUBLAS to produce silent numerical errors during BF16/FP16 matrix multiplications, meaning training would run without crashing but produce corrupted gradients and garbage model weights. PyTorch 2.3.0 with CUDA 12.1 (`cu121`) is unaffected. This benchmark pins `pytorch_version="2.3.0"` to use the `cu121` build and avoid the issue entirely.
 
 ---
 
