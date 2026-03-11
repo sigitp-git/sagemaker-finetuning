@@ -884,7 +884,11 @@ aws s3 cp reports/ s3://your-telco-llm-bucket/reports/ --recursive
 
 **QLoRA (Quantized LoRA)** — LoRA with 4-bit quantized base model weights. Allows fine-tuning large models on less GPU memory.
 
-**BF16 (Brain Float 16)** — A 16-bit floating point format used during training to reduce memory while maintaining numerical stability.
+**BF16 (Brain Float 16)** — A 16-bit floating point format that uses 8 exponent bits and 7 mantissa bits. Preferred for ML training because it covers the same numeric range as FP32 while halving memory usage. Maintains numerical stability better than FP16 for gradient updates.
+
+**FP16 (Float 16 / Half Precision)** — A 16-bit floating point format with 5 exponent bits and 10 mantissa bits. Offers more precision than BF16 but a narrower numeric range, making it more prone to overflow/underflow during training. Often used with loss scaling to compensate.
+
+**NF4 (4-bit NormalFloat)** — The quantization format used by QLoRA via `bitsandbytes`. Optimally distributes 4-bit values assuming normally distributed weights, reducing model memory from ~28GB (FP16) to ~7GB for a 14B model. Base weights stay frozen in NF4 while LoRA adapters train in BF16.
 
 ### Prompting Strategies
 
@@ -944,7 +948,23 @@ aws s3 cp reports/ s3://your-telco-llm-bucket/reports/ --recursive
 
 **boto3** — Official AWS SDK for Python.
 
-**Hugging Face** — Open-source platform hosting pre-trained ML models and providing `transformers`, `peft`, and `trl` libraries.
+**Hugging Face** — Open-source platform hosting pre-trained ML models and providing the core ML libraries used in this benchmark (`transformers`, `peft`, `trl`, `datasets`, `accelerate`).
+
+**`transformers`** — Hugging Face's core library. Loads pre-trained models (Mistral-Nemo, Qwen3, Gemma), handles tokenization, and provides `TrainingArguments` for configuring fine-tuning jobs. The backbone everything else plugs into.
+
+**`peft` (Parameter-Efficient Fine-Tuning)** — Provides `LoraConfig` and `get_peft_model` to apply LoRA/QLoRA adapters. Instead of fine-tuning all 14B parameters, it trains small rank-decomposition matrices (~0.5-2% of weights), making fine-tuning feasible on a single A10G GPU.
+
+**`trl` (Transformer Reinforcement Learning)** — Used here for `SFTTrainer` (Supervised Fine-Tuning). Wraps the Hugging Face Trainer with SFT-specific features like dataset formatting, packing, and completion-only training masks.
+
+**`datasets`** — Hugging Face's data loading library. Reads JSONL training files (`train.jsonl`, `test.jsonl`) into a streaming-friendly format that integrates directly with `SFTTrainer`. Handles shuffling, batching, and train/test splits.
+
+**`accelerate`** — Handles distributed training and mixed-precision (BF16/FP16) across GPUs. On `ml.g5.12xlarge` (4x A10G) for Qwen3, it manages multi-GPU data parallelism. On single-GPU instances, it handles device placement and gradient accumulation.
+
+**`bitsandbytes`** — Provides 4-bit quantization for QLoRA. Loads base model weights in NF4 format, reducing VRAM from ~28GB (FP16) to ~7GB. This is what makes fine-tuning 14B models possible on 24GB A10G GPUs.
+
+**`huggingface_hub`** — Handles authentication and model downloads from the Hugging Face Hub. Required for gated models like Gemma 3 that need an accepted license agreement. Also used by SageMaker DLC containers to pull model weights during training/inference.
+
+**`scikit-learn`** — Used in `src/evaluate.py` for computing classification metrics: F1 score, precision, recall, and exact match. Specifically `f1_score`, `precision_score`, `recall_score` with `average='weighted'` for multi-class evaluation across the 8 failure types.
 
 **TRL** — Transformer Reinforcement Learning library providing `SFTTrainer` for supervised fine-tuning.
 
