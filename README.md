@@ -245,6 +245,21 @@ s3://your-telco-llm-bucket/
 
 ![QLoRA 4-bit Fine-Tuning Architecture](images/arch-qlora.png)
 
+The diagram above shows the three components of the QLoRA 4-bit fine-tuning setup used in this benchmark:
+
+**Base Model (Frozen, 4-bit Quantized)** — The original pretrained model (~14B parameters) loaded in NF4 format via `bitsandbytes`, compressing it from ~28GB (FP16) down to ~6-7GB VRAM. All weights are frozen during training. The standard transformer layers remain unchanged:
+
+- **Embedding** — Converts input tokens (words/subwords) into dense numerical vectors that the model can process. Each token maps to a high-dimensional vector (e.g., 4096 dimensions for a 14B model).
+- **Attention (Q, K, V, O)** — The self-attention mechanism, the core of the transformer. Each input token is projected into three vectors: Query (Q), Key (K), and Value (V). Q and K compute attention scores (which tokens should attend to which), V carries the actual information, and O (Output) projects the combined result back to the model's hidden dimension. This is where LoRA adapters are injected — specifically into `q_proj` and `v_proj`.
+- **MLP — Multi-Layer Perceptron (gate, up, down)** — The feed-forward network applied after attention. In modern architectures like Mistral, Qwen3, and Gemma, this uses a gated structure: `gate` and `up` projections expand the hidden dimension (typically 4×), the gate applies a nonlinear activation (SiLU/swish), and `down` projects back to the original dimension. This is where the model learns complex feature transformations.
+- **LM Head — Language Model Head** — The final linear layer that maps the model's hidden states to vocabulary logits (one score per token in the vocabulary). The highest-scoring token becomes the model's next-token prediction.
+
+**LoRA Adapter (Trainable)** — Fine-tuning all 14B parameters would require enormous memory and compute. LoRA (Low-Rank Adaptation) avoids this by keeping the original model weights frozen and injecting two small trainable matrices (A and B) alongside specific layers. During a forward pass, the output of a targeted layer becomes `W' = W_frozen + B × A` — the original frozen weight plus a low-rank update. Matrix A has shape `d×r` and matrix B has shape `r×d`, where `d` is the layer's hidden dimension and `r` is the rank (set to `r=16` in this benchmark). The rank controls how much new capacity the adapter adds — a lower rank means fewer trainable parameters but less expressiveness. The `alpha=32` parameter is a scaling factor that controls how strongly the adapter's contribution influences the output (effectively scaled as `alpha/rank = 32/16 = 2×`). The targets `q_proj` and `v_proj` are the query and value projection matrices inside the attention layers — these were chosen because they have the most impact on how the model attends to and interprets input tokens, which is critical for learning domain-specific patterns in 3GPP logs. Only A and B matrices are trained, which amounts to ~0.5% of total model weights, producing a tiny adapter of ~50-100 MB per model (compared to ~28GB for the full model in FP16). At inference time, the adapter merges back into the frozen base weights (`W' = W_frozen + B × A`), adding zero latency overhead — the merged model runs at the same speed as the original.
+
+**Training Config** — Hyperparameters used with `SFTTrainer` from `trl`: `batch_size=1` with `grad_accum=8` for an effective batch size of 8, `max_steps=325`, learning rate `2e-4` with cosine decay, BF16 precision for the LoRA adapters (while the base stays in NF4), and `max_seq_len=2048`.
+
+> **Why QLoRA 4-bit?** All 12-14B models exceed 24GB A10G VRAM when loaded in BF16 with training overhead. QLoRA compresses base weights to NF4 (~6-7GB), leaving headroom for activations, gradients, and optimizer states. Qwen3-14B additionally needs 4× GPUs due to heavier activation memory.
+
 ![SageMaker Training Job Flow](images/arch-training-flow.png)
 
 Run LoRA/QLoRA fine-tuning using the [Hugging Face TRL](https://github.com/huggingface/trl) library and PEFT.
